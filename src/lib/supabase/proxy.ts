@@ -1,8 +1,12 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-// Paths reachable without a session (TikTok app review needs the legal pages public).
+// Paths reachable without a session (TikTok app review needs the landing and legal pages public).
 const PUBLIC_PATHS = ["/login", "/privacy", "/terms"];
+
+function isPublic(pathname: string) {
+  return pathname === "/" || PUBLIC_PATHS.some((p) => pathname.startsWith(p));
+}
 
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -33,9 +37,7 @@ export async function updateSession(request: NextRequest) {
 
   // Refreshes the session if expired; must run before any redirect decision.
   const { data } = await supabase.auth.getClaims();
-  const isPublic = PUBLIC_PATHS.some((p) => request.nextUrl.pathname.startsWith(p));
-
-  if (!data?.claims && !isPublic) {
+  if (!data?.claims && !isPublic(request.nextUrl.pathname)) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);

@@ -12,7 +12,7 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
     password: String(formData.get("password") ?? ""),
   });
   if (error) return { error: error.message };
-  redirect("/");
+  redirect("/dashboard");
 }
 
 export async function logout() {

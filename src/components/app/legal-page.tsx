@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 // TODO(legal): fill in the operator's legal name, address and contact email before submitting the TikTok app.
-export const OPERATOR = { name: "[Company name]", address: "[Address]", email: "[contact@yourdomain.com]" };
+export const OPERATOR = { name: "DUSLABS", address: "[Address]", email: "[contact@yourdomain.com]" };
 
 export function LegalPage({ title, updated, children }: { title: string; updated: string; children: ReactNode }) {
   return (

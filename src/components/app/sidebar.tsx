@@ -18,7 +18,7 @@ import { logout } from "@/app/login/actions";
 import { Logo } from "./logo";
 
 const primary = [
-  { href: "/", label: "Home", icon: Home },
+  { href: "/dashboard", label: "Home", icon: Home },
   { href: "/campaigns", label: "Campaigns", icon: Megaphone },
   { href: "/library", label: "Library", icon: Images },
   { href: "/calendar", label: "Calendar", icon: CalendarDays },
@@ -35,7 +35,7 @@ export function Sidebar() {
   const pathname = usePathname();
 
   const item = ({ href, label, icon: Icon }: (typeof primary)[number]) => {
-    const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
+    const active = pathname.startsWith(href);
     return (
       <Link
         key={href}
