@@ -11,12 +11,12 @@ export default async function CampaignPostsPage({ params }: PageProps<"/campaign
   const { id } = await params;
   const { supabase } = await getWorkspace();
 
-  const { data: campaign } = await supabase.from("campaigns").select("id, name").eq("id", id).maybeSingle();
+  const { data: campaign } = await supabase.from("campaigns").select("id, name, tiktok_account_id").eq("id", id).maybeSingle();
   if (!campaign) notFound();
 
   const { data: rows, error } = await supabase
     .from("posts")
-    .select("id, status, caption, error, created_at, post_slides(id, position, kind, text, rendered_path)")
+    .select("id, status, caption, error, created_at, scheduled_for, tiktok_publish_id, post_slides(id, position, kind, text, rendered_path)")
     .eq("campaign_id", id)
     .order("created_at", { ascending: false })
     .limit(50);
@@ -32,10 +32,12 @@ export default async function CampaignPostsPage({ params }: PageProps<"/campaign
     caption: p.caption ?? "",
     error: p.error,
     createdAt: p.created_at,
+    scheduledFor: p.scheduled_for,
+    sentToTikTok: !!p.tiktok_publish_id,
     slides: (p.post_slides as SlideRow[])
       .sort((a, b) => a.position - b.position)
       .map((s) => ({ id: s.id, kind: s.kind, text: s.text, url: s.rendered_path ? (urls.get(s.rendered_path) ?? null) : null })),
   }));
 
-  return <PostsView campaign={campaign} posts={posts} />;
+  return <PostsView campaign={{ id: campaign.id, name: campaign.name, hasAccount: !!campaign.tiktok_account_id }} posts={posts} />;
 }

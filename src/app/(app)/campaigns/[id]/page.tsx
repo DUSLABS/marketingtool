@@ -16,7 +16,7 @@ export default async function CampaignPage({ params }: PageProps<"/campaigns/[id
   const { data: campaign } = await supabase.from("campaigns").select("*").eq("id", id).maybeSingle();
   if (!campaign) notFound();
 
-  const [hooks, ctas, products, libraries] = await Promise.all([
+  const [hooks, ctas, products, libraries, accounts, slots] = await Promise.all([
     supabase.from("campaign_hooks").select("id, text, enabled, source, style").eq("campaign_id", id).order("created_at"),
     supabase.from("campaign_ctas").select("id, text, enabled, source").eq("campaign_id", id).order("created_at"),
     supabase.from("products").select("id, name").order("created_at"),
@@ -25,8 +25,10 @@ export default async function CampaignPage({ params }: PageProps<"/campaigns/[id
       .select(`id, name, library_assets(asset:assets(thumb_path, locked))`)
       .order("created_at")
       .limit(SAMPLES_PER_LIBRARY, { foreignTable: "library_assets" }),
+    supabase.from("tiktok_accounts").select("id, username, display_name, status").order("created_at"),
+    supabase.from("schedule_slots").select("id, time_of_day, weekdays").eq("campaign_id", id).order("time_of_day"),
   ]);
-  for (const r of [hooks, ctas, products, libraries]) if (r.error) throw r.error;
+  for (const r of [hooks, ctas, products, libraries, accounts, slots]) if (r.error) throw r.error;
 
   // Preview images: a sample of unlocked thumbnails per library.
   const libraryRows = (libraries.data ?? []).map((lib) => ({
@@ -58,6 +60,14 @@ export default async function CampaignPage({ params }: PageProps<"/campaigns/[id
     web_research: campaign.web_research,
     cta_enabled: campaign.cta_enabled,
     layout: withDefaults(campaign.layout as Partial<CampaignLayout>),
+    tiktok_account_id: campaign.tiktok_account_id,
+    publish_mode: campaign.publish_mode,
+    privacy_level: campaign.privacy_level,
+    allow_comments: campaign.allow_comments,
+    disclose_commercial: campaign.disclose_commercial,
+    ai_label: campaign.ai_label,
+    timezone: campaign.timezone,
+    max_posts_per_day: campaign.max_posts_per_day,
   };
 
   return (
@@ -67,6 +77,12 @@ export default async function CampaignPage({ params }: PageProps<"/campaigns/[id
       ctas={ctas.data as CopyItem[]}
       products={products.data ?? []}
       libraries={editorLibraries}
+      accounts={(accounts.data ?? []).map((a) => ({
+        id: a.id,
+        name: a.username ? `@${a.username}` : (a.display_name ?? "TikTok account"),
+        status: a.status,
+      }))}
+      slots={slots.data ?? []}
     />
   );
 }

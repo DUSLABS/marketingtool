@@ -27,8 +27,10 @@ import {
   updateCampaign,
   type CampaignPatch,
   type CopyItem,
+  type Slot,
 } from "../actions";
 import { CopyList } from "./copy-list";
+import { PublishSettings, type PublishAccount } from "./publish-settings";
 
 export type EditorCampaign = {
   id: string;
@@ -44,6 +46,14 @@ export type EditorCampaign = {
   web_research: boolean;
   cta_enabled: boolean;
   layout: CampaignLayout;
+  tiktok_account_id: string | null;
+  publish_mode: "draft" | "direct";
+  privacy_level: string | null;
+  allow_comments: boolean;
+  disclose_commercial: boolean;
+  ai_label: boolean;
+  timezone: string;
+  max_posts_per_day: number;
 };
 
 export type EditorLibrary = { id: string; name: string; images: string[] };
@@ -54,12 +64,17 @@ type Props = {
   ctas: CopyItem[];
   products: { id: string; name: string }[];
   libraries: EditorLibrary[];
+  accounts: PublishAccount[];
+  slots: Slot[];
 };
 
-const TABS: { value: SlideKind; label: string }[] = [
+type Tab = SlideKind | "publish";
+
+const TABS: { value: Tab; label: string }[] = [
   { value: "hook", label: "Hook" },
   { value: "content", label: "Content" },
   { value: "cta", label: "CTA" },
+  { value: "publish", label: "Publish" },
 ];
 
 const AUTOSAVE_MS = 600;
@@ -113,11 +128,11 @@ function useAutosave(initial: EditorCampaign) {
   return { campaign, patch, flush, status };
 }
 
-export function CampaignEditor({ campaign: initial, hooks: initialHooks, ctas: initialCtas, products, libraries }: Props) {
+export function CampaignEditor({ campaign: initial, hooks: initialHooks, ctas: initialCtas, products, libraries, accounts, slots }: Props) {
   const { campaign, patch, flush, status } = useAutosave(initial);
   const [hooks, setHooks] = useState(initialHooks);
   const [ctas, setCtas] = useState(initialCtas);
-  const [tab, setTab] = useState<SlideKind>("hook");
+  const [tab, setTab] = useState<Tab>("hook");
   const [contentIndex, setContentIndex] = useState(0);
   const [previewHookId, setPreviewHookId] = useState<string | null>(null);
   const [previewCtaId, setPreviewCtaId] = useState<string | null>(null);
@@ -151,7 +166,8 @@ export function CampaignEditor({ campaign: initial, hooks: initialHooks, ctas: i
     ...contentTexts.map((text, index) => ({ kind: "content" as const, index, text })),
     ...(campaign.cta_enabled ? [{ kind: "cta" as const, index: 0, text: ctaText }] : []),
   ];
-  const active = tab === "content" ? strip[1 + Math.min(contentIndex, contentTexts.length - 1)] : strip.find((s) => s.kind === tab) ?? strip[0];
+  const active =
+    tab === "content" ? strip[1 + Math.min(contentIndex, contentTexts.length - 1)] : (strip.find((s) => s.kind === tab) ?? strip[0]);
 
   function generatePreview() {
     startAi(async () => {
@@ -257,11 +273,9 @@ export function CampaignEditor({ campaign: initial, hooks: initialHooks, ctas: i
                 </button>
               ))}
             </div>
-            <KindToolbar
-              layout={layout[tab]}
-              libraries={libraries}
-              onChange={(p) => setKindLayout(tab, p)}
-            />
+            {tab !== "publish" && (
+              <KindToolbar layout={layout[tab]} libraries={libraries} onChange={(p) => setKindLayout(tab, p)} />
+            )}
           </div>
 
           <div className="space-y-6 p-5">
@@ -318,7 +332,11 @@ export function CampaignEditor({ campaign: initial, hooks: initialHooks, ctas: i
               </div>
             )}
 
-            <LayoutControls layout={layout[tab]} onChange={(p) => setKindLayout(tab, p)} />
+            {tab === "publish" && (
+              <PublishSettings campaign={campaign} patch={patch} accounts={accounts} slots={slots} beforeStart={flush} />
+            )}
+
+            {tab !== "publish" && <LayoutControls layout={layout[tab]} onChange={(p) => setKindLayout(tab, p)} />}
           </div>
         </section>
 

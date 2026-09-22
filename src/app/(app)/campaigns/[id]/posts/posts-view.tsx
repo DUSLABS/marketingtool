@@ -3,14 +3,14 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { ArrowLeft, ChevronLeft, ChevronRight, Copy, Download, RefreshCw, Sparkles, Trash2 } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, Copy, Download, RefreshCw, Send, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { deletePost, generatePost, rerenderPost, updatePostCaption } from "./actions";
+import { deletePost, generatePost, refreshPostStatus, rerenderPost, sendPostToTikTok, updatePostCaption } from "./actions";
 
 export type PostSummary = {
   id: string;
@@ -18,6 +18,8 @@ export type PostSummary = {
   caption: string;
   error: string | null;
   createdAt: string;
+  scheduledFor: string | null;
+  sentToTikTok: boolean;
   slides: { id: string; kind: string; text: string; url: string | null }[];
 };
 
@@ -25,13 +27,21 @@ const STATUS_LABEL: Record<string, string> = {
   preview: "Ready",
   queued: "Scheduled",
   rendering: "Rendering",
-  uploading: "Uploading",
-  in_drafts: "In TikTok drafts",
+  uploading: "TikTok is processing",
+  in_drafts: "In TikTok inbox",
   published: "Published",
   failed: "Failed",
 };
 
-export function PostsView({ campaign, posts }: { campaign: { id: string; name: string }; posts: PostSummary[] }) {
+const TIKTOK_STATUS: Record<string, string> = {
+  SEND_TO_USER_INBOX: "Sent to your TikTok inbox. Open TikTok to finish and post it.",
+  PUBLISH_COMPLETE: "Published on TikTok.",
+  PROCESSING_DOWNLOAD: "TikTok is downloading the images…",
+  PROCESSING_UPLOAD: "TikTok is processing the post…",
+  FAILED: "TikTok rejected the post.",
+};
+
+export function PostsView({ campaign, posts }: { campaign: { id: string; name: string; hasAccount: boolean }; posts: PostSummary[] }) {
   const router = useRouter();
   const [generating, startGenerating] = useTransition();
   const [viewer, setViewer] = useState<{ post: PostSummary; index: number } | null>(null);
@@ -73,7 +83,7 @@ export function PostsView({ campaign, posts }: { campaign: { id: string; name: s
 
       <div className="space-y-4">
         {posts.map((post) => (
-          <PostCard key={post.id} post={post} onOpen={(index) => setViewer({ post, index })} />
+          <PostCard key={post.id} post={post} canSend={campaign.hasAccount} onOpen={(index) => setViewer({ post, index })} />
         ))}
       </div>
 
@@ -82,7 +92,7 @@ export function PostsView({ campaign, posts }: { campaign: { id: string; name: s
   );
 }
 
-function PostCard({ post, onOpen }: { post: PostSummary; onOpen: (index: number) => void }) {
+function PostCard({ post, canSend, onOpen }: { post: PostSummary; canSend: boolean; onOpen: (index: number) => void }) {
   const router = useRouter();
   const [caption, setCaption] = useState(post.caption);
   const [busy, startBusy] = useTransition();
@@ -95,10 +105,46 @@ function PostCard({ post, onOpen }: { post: PostSummary; onOpen: (index: number)
           {STATUS_LABEL[post.status] ?? post.status}
         </Badge>
         <span className="text-muted-foreground">
-          {new Date(post.createdAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })} · {post.slides.length} slides
+          {post.scheduledFor ? "Slot " : ""}
+          {new Date(post.scheduledFor ?? post.createdAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })} ·{" "}
+          {post.slides.length} slides
         </span>
         <div className="ml-auto flex items-center gap-1">
-          {(!rendered || post.status === "failed") && (
+          {rendered && (!post.sentToTikTok || post.status === "failed") && (
+            <Button
+              size="sm"
+              disabled={busy || !canSend}
+              title={canSend ? "Send to TikTok with this campaign's publish settings" : "Choose a TikTok account in the campaign's Publish tab"}
+              onClick={() =>
+                startBusy(async () => {
+                  const res = await sendPostToTikTok(post.id);
+                  if (!res.ok) toast.error(res.error, { duration: 10_000 });
+                  else toast.success(TIKTOK_STATUS[res.data] ?? "Sent to TikTok");
+                  router.refresh();
+                })
+              }
+            >
+              <Send /> Send to TikTok
+            </Button>
+          )}
+          {post.status === "uploading" && (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={() =>
+                startBusy(async () => {
+                  const res = await refreshPostStatus(post.id);
+                  if (!res.ok) toast.error(res.error);
+                  else toast(TIKTOK_STATUS[res.data] ?? res.data);
+                  router.refresh();
+                })
+              }
+            >
+              <RefreshCw className={cn(busy && "animate-spin")} /> Check status
+            </Button>
+          )}
+          {(!rendered || (post.status === "failed" && !post.sentToTikTok)) && (
             <Button
               variant="ghost"
               size="sm"

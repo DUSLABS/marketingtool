@@ -7,6 +7,7 @@ import { getWorkspace } from "@/lib/workspace";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { buildPost, CampaignNotReadyError } from "@/lib/engine/build-post";
 import { renderPost } from "@/lib/engine/render-post";
+import { publishErrorMessage, publishPost, syncPublishStatus } from "@/lib/engine/publish-post";
 
 export type ActionResult<T = void> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -86,4 +87,39 @@ export async function deletePost(postId: string) {
   const { error } = await supabase.from("posts").delete().eq("id", postId).eq("workspace_id", workspaceId);
   if (error) throw error;
   revalidatePath("/campaigns", "layout");
+}
+
+export async function sendPostToTikTok(postId: string): Promise<ActionResult<string>> {
+  const { workspaceId } = await getWorkspace();
+  const db = createAdminClient();
+  try {
+    await publishPost(db, { postId, workspaceId });
+    // TikTok usually needs a few seconds to pull the images; check once right away.
+    const { data: post } = await db.from("posts").select("id, tiktok_publish_id, tiktok_account_id").eq("id", postId).single();
+    const status = post ? await syncPublishStatus(db, post).catch(() => "PROCESSING_DOWNLOAD") : "PROCESSING_DOWNLOAD";
+    revalidatePath("/campaigns", "layout");
+    return { ok: true, data: status };
+  } catch (e) {
+    console.error(e);
+    return { ok: false, error: publishErrorMessage(e) };
+  }
+}
+
+export async function refreshPostStatus(postId: string): Promise<ActionResult<string>> {
+  const { workspaceId } = await getWorkspace();
+  const db = createAdminClient();
+  const { data: post } = await db
+    .from("posts")
+    .select("id, tiktok_publish_id, tiktok_account_id")
+    .eq("id", postId)
+    .eq("workspace_id", workspaceId)
+    .single();
+  if (!post?.tiktok_publish_id || !post.tiktok_account_id) return { ok: false, error: "This post was not sent to TikTok." };
+  try {
+    const status = await syncPublishStatus(db, post);
+    revalidatePath("/campaigns", "layout");
+    return { ok: true, data: status };
+  } catch (e) {
+    return { ok: false, error: publishErrorMessage(e) };
+  }
 }

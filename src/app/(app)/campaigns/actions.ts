@@ -13,7 +13,11 @@ import {
   type CampaignContext,
   type ProductContext,
 } from "@/lib/ai/generate";
-import type { CampaignLayout } from "@/lib/slides/types";
+import { withDefaults, type CampaignLayout } from "@/lib/slides/types";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { getAccessToken } from "@/lib/tiktok/accounts";
+import { queryCreatorInfo } from "@/lib/tiktok/api";
+import { publishErrorMessage } from "@/lib/engine/publish-post";
 
 // ─── Campaign CRUD ───────────────────────────────────────────────────────────
 
@@ -44,6 +48,14 @@ export type CampaignPatch = Partial<{
   web_research: boolean;
   cta_enabled: boolean;
   layout: CampaignLayout;
+  tiktok_account_id: string | null;
+  publish_mode: "draft" | "direct";
+  privacy_level: string | null;
+  allow_comments: boolean;
+  disclose_commercial: boolean;
+  ai_label: boolean;
+  timezone: string;
+  max_posts_per_day: number;
 }>;
 
 const PATCHABLE = new Set<keyof CampaignPatch>([
@@ -58,6 +70,14 @@ const PATCHABLE = new Set<keyof CampaignPatch>([
   "web_research",
   "cta_enabled",
   "layout",
+  "tiktok_account_id",
+  "publish_mode",
+  "privacy_level",
+  "allow_comments",
+  "disclose_commercial",
+  "ai_label",
+  "timezone",
+  "max_posts_per_day",
 ]);
 
 export async function updateCampaign(id: string, patch: CampaignPatch) {
@@ -194,4 +214,80 @@ export async function aiPreviewContent(campaignId: string, hook: string) {
     const { slides } = await generateContentSlides({ product, campaign, hook, research });
     return slides;
   });
+}
+
+// ─── Publishing & schedule ───────────────────────────────────────────────────
+
+export type Slot = { id: string; time_of_day: string; weekdays: number[] };
+
+export async function addScheduleSlot(campaignId: string, time: string): Promise<Slot> {
+  const { supabase } = await getWorkspace();
+  const { data, error } = await supabase
+    .from("schedule_slots")
+    .insert({ campaign_id: campaignId, time_of_day: time })
+    .select("id, time_of_day, weekdays")
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateScheduleSlot(id: string, patch: { time_of_day?: string; weekdays?: number[] }) {
+  const { supabase } = await getWorkspace();
+  const { error } = await supabase.from("schedule_slots").update(patch).eq("id", id);
+  if (error) throw error;
+}
+
+export async function deleteScheduleSlot(id: string) {
+  const { supabase } = await getWorkspace();
+  const { error } = await supabase.from("schedule_slots").delete().eq("id", id);
+  if (error) throw error;
+}
+
+/** Privacy options and account details TikTok currently allows for direct posts. */
+export async function getCreatorOptions(accountId: string): Promise<AiResult<{ privacyLevels: string[]; commentsDisabled: boolean }>> {
+  const { workspaceId } = await getWorkspace();
+  const db = createAdminClient();
+  const { data: account } = await db.from("tiktok_accounts").select("id").eq("id", accountId).eq("workspace_id", workspaceId).single();
+  if (!account) return { ok: false, error: "Account not found" };
+  try {
+    const info = await queryCreatorInfo(await getAccessToken(db, accountId));
+    return { ok: true, data: { privacyLevels: info.privacy_level_options, commentsDisabled: info.comment_disabled } };
+  } catch (e) {
+    return { ok: false, error: publishErrorMessage(e) };
+  }
+}
+
+/** Starts or pauses a campaign. Starting checks everything the scheduler needs. */
+export async function setCampaignStatus(campaignId: string, status: "active" | "paused"): Promise<AiResult<null>> {
+  const { supabase } = await getWorkspace();
+  if (status === "active") {
+    const [{ data: c }, { count: hooks }, { count: slots }] = await Promise.all([
+      supabase
+        .from("campaigns")
+        .select("layout, cta_enabled, content_prompt, publish_mode, privacy_level, account:tiktok_accounts(status)")
+        .eq("id", campaignId)
+        .single(),
+      supabase.from("campaign_hooks").select("id", { count: "exact", head: true }).eq("campaign_id", campaignId).eq("enabled", true),
+      supabase.from("schedule_slots").select("id", { count: "exact", head: true }).eq("campaign_id", campaignId),
+    ]);
+    if (!c) return { ok: false, error: "Campaign not found" };
+    const layout = withDefaults(c.layout);
+    const account = c.account as unknown as { status: string } | null;
+    const problems = [
+      !account && "choose a TikTok account",
+      account && account.status !== "active" && "reconnect the TikTok account",
+      c.publish_mode === "direct" && !c.privacy_level && "choose who can see the posts",
+      !slots && "add at least one posting time",
+      !hooks && "add at least one active hook",
+      !c.content_prompt.trim() && "describe what the posts are about",
+      !layout.hook.libraryId && "choose a hook image library",
+      !layout.content.libraryId && "choose a content image library",
+      c.cta_enabled && !layout.cta.libraryId && "choose a CTA image library",
+    ].filter(Boolean);
+    if (problems.length) return { ok: false, error: `Before starting: ${problems.join(", ")}.` };
+  }
+  const { error } = await supabase.from("campaigns").update({ status }).eq("id", campaignId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/campaigns");
+  return { ok: true, data: null };
 }
