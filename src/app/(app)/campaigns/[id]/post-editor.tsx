@@ -173,6 +173,9 @@ export function PostEditorDialog({
                           imageCrop={slide.imageCrop}
                           showSafeArea={showSafeArea}
                           onBoxChange={(box) => updateSlide(i, { layout: { ...slide.layout, box } })}
+                          onBadgeChange={
+                            slide.layout.badge?.enabled ? (badge) => updateSlide(i, { layout: { ...slide.layout, badge } }) : undefined
+                          }
                         />
                       ) : (
                         <ScaledSlide width={CARD_WIDTH - 4}>

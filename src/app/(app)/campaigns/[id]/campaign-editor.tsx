@@ -39,7 +39,7 @@ import { Segmented, selectClass } from "@/components/app/segmented";
 import { EditableSlide } from "@/components/slides/editable-slide";
 import { ScaledSlide, Slide } from "@/components/slides/slide";
 import { TEXT_STYLES } from "@/lib/slides/styles";
-import type { CampaignLayout, ImageCrop, SlideKind, SlideLayout, TextAlign, TextStyleId } from "@/lib/slides/types";
+import { ctaPosition, type BadgeLayout, type CampaignLayout, type ImageCrop, type SlideKind, type SlideLayout, type TextAlign, type TextStyleId } from "@/lib/slides/types";
 import { cn } from "@/lib/utils";
 import {
   aiOptimizePrompt,
@@ -198,8 +198,10 @@ export function CampaignEditor({
   const strip: StripSlide[] = [
     { kind: "hook", index: 0, text: hookText || "Your hook goes here", placeholder: !hookText },
     ...contentTexts.map((c, index) => ({ kind: "content" as const, index, ...c })),
-    ...(campaign.cta_enabled ? [{ kind: "cta" as const, index: 0, text: ctaText, placeholder: false }] : []),
   ];
+  if (campaign.cta_enabled) {
+    strip.splice(ctaPosition(layout.cta.placement, contentTexts.length), 0, { kind: "cta", index: 0, text: ctaText, placeholder: false });
+  }
 
   const imageAt = (kind: SlideKind, index: number) => {
     const images = libraries.find((l) => l.id === layout[kind].libraryId)?.images ?? [];
@@ -342,6 +344,7 @@ export function CampaignEditor({
                 label={s.kind === "hook" ? `Hook · ${enabledHooks.length} rotating` : s.kind === "cta" ? "CTA" : "Content"}
                 onSelect={() => select(s.kind, s.index)}
                 onBoxChange={(box) => setKindLayout(s.kind, { box })}
+                onBadgeChange={s.kind === "cta" ? (badge) => setKindLayout("cta", { badge }) : undefined}
                 onLibrary={(libraryId) => setKindLayout(s.kind, { libraryId })}
                 onEye={s.kind === "hook" ? cycleHook : undefined}
               />
@@ -416,15 +419,6 @@ export function CampaignEditor({
 
             {tab === "cta" && (
               <div className="space-y-5">
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={campaign.cta_enabled}
-                    onChange={(e) => patch({ cta_enabled: e.target.checked })}
-                    className="size-4 accent-[var(--accent-primary)]"
-                  />
-                  End every post with a CTA slide
-                </label>
                 {campaign.cta_enabled && (
                   <>
                     <CopyList
@@ -439,12 +433,31 @@ export function CampaignEditor({
                       }}
                       beforeAi={flush}
                     />
-                    <p className="text-xs text-muted-foreground">
-                      Tip: use app screenshots with the App Store badge as CTA images. Without any CTA text the slide shows only
-                      the image.
-                    </p>
+                    <BadgeControls
+                      badge={layout.cta.badge!}
+                      onChange={(p) => setKindLayout("cta", { badge: { ...layout.cta.badge!, ...p } })}
+                      onEnable={() => select("cta", 0)}
+                    />
                   </>
                 )}
+                <div className="space-y-2 border-t border-border pt-5">
+                  <Label className="text-muted-foreground">Lands</Label>
+                  <Segmented
+                    value={!campaign.cta_enabled ? "none" : (layout.cta.placement ?? "end")}
+                    onChange={(v) => {
+                      if (v === "none") return patch({ cta_enabled: false });
+                      patch({ cta_enabled: true, layout: { ...layout, cta: { ...layout.cta, placement: v } } });
+                    }}
+                    options={[
+                      { value: "end", label: "At the end" },
+                      { value: "middle", label: "Mid-deck" },
+                      { value: "none", label: "No CTA slide" },
+                    ]}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Tip: app screenshots make good CTA images. Without CTA text the slide shows only the image (and badge).
+                  </p>
+                </div>
               </div>
             )}
 
@@ -522,6 +535,7 @@ function SlideCard({
   label,
   onSelect,
   onBoxChange,
+  onBadgeChange,
   onLibrary,
   onEye,
 }: {
@@ -536,6 +550,7 @@ function SlideCard({
   label: string;
   onSelect: () => void;
   onBoxChange: (box: SlideLayout["box"]) => void;
+  onBadgeChange?: (badge: BadgeLayout) => void;
   onLibrary: (libraryId: string | null) => void;
   onEye?: () => void;
 }) {
@@ -561,6 +576,7 @@ function SlideCard({
             imageCrop={image?.crop}
             showSafeArea={showSafeArea}
             onBoxChange={onBoxChange}
+            onBadgeChange={onBadgeChange}
           />
         ) : (
           <ScaledSlide width={CARD_WIDTH}>
@@ -608,6 +624,69 @@ function SlideCard({
       <div className={cn("border-t border-border px-3 py-2 text-sm", inTab ? "font-medium text-foreground" : "text-muted-foreground")}>
         {label}
       </div>
+    </div>
+  );
+}
+
+// ─── App Store badge ───────────────────────────────────────────────────────
+
+function BadgeControls({
+  badge,
+  onChange,
+  onEnable,
+}: {
+  badge: BadgeLayout;
+  onChange: (p: Partial<BadgeLayout>) => void;
+  onEnable: () => void;
+}) {
+  return (
+    <div className="space-y-4 rounded-xl border border-border p-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={badge.enabled}
+            onChange={(e) => {
+              onChange({ enabled: e.target.checked });
+              if (e.target.checked) onEnable();
+            }}
+            className="size-4 accent-[var(--accent-primary)]"
+          />
+          App Store badge
+        </label>
+        {badge.enabled && (
+          <>
+            <Segmented
+              size="sm"
+              value={badge.variant}
+              onChange={(variant) => onChange({ variant })}
+              options={[
+                { value: "dark", label: "Dark" },
+                { value: "light", label: "Light" },
+              ]}
+            />
+            <span className="text-xs text-muted-foreground">drag it on the CTA slide to place it</span>
+          </>
+        )}
+      </div>
+      {badge.enabled && (
+        <label className="flex items-center gap-4 text-sm">
+          <span className="w-10 text-muted-foreground">Size</span>
+          <input
+            type="range"
+            min={0.2}
+            max={0.9}
+            step={0.01}
+            value={badge.w}
+            onChange={(e) => {
+              const w = Number(e.target.value);
+              onChange({ w, x: Math.min(1 - w / 2, Math.max(w / 2, badge.x)) });
+            }}
+            className="flex-1 accent-[var(--accent-primary)]"
+          />
+          <span className="w-12 rounded-lg border border-border px-2 py-1 text-right tabular-nums">{Math.round(badge.w * 100)}%</span>
+        </label>
+      )}
     </div>
   );
 }

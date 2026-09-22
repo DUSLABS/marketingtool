@@ -1,5 +1,14 @@
 import type { HTMLAttributes, ReactNode } from "react";
-import { CANVAS, POST_VIEW_VISIBLE, SAFE_AREA, type ImageCrop, type SlideKind, type SlideLayout } from "@/lib/slides/types";
+import {
+  BADGE_ASPECT,
+  BADGE_SRC,
+  CANVAS,
+  POST_VIEW_VISIBLE,
+  SAFE_AREA,
+  type ImageCrop,
+  type SlideKind,
+  type SlideLayout,
+} from "@/lib/slides/types";
 import { textStyle } from "@/lib/slides/styles";
 
 type SlideProps = {
@@ -12,13 +21,26 @@ type SlideProps = {
   /** Extra props for the text box (the editor uses this for dragging). */
   textBoxProps?: HTMLAttributes<HTMLDivElement>;
   textBoxChildren?: ReactNode;
+  /** Extra props for the App Store badge (the editor uses this for dragging). */
+  badgeProps?: HTMLAttributes<HTMLDivElement>;
 };
 
 /**
  * One slide at its real size (1080×1920). This is the single source of truth for how a slide
  * looks: the editor shows it scaled down and the renderer screenshots it at full size.
  */
-export function Slide({ kind, layout, text, imageUrl, imageCrop, showSafeArea, textBoxProps, textBoxChildren }: SlideProps) {
+export function Slide({
+  kind,
+  layout,
+  text,
+  imageUrl,
+  imageCrop,
+  showSafeArea,
+  textBoxProps,
+  textBoxChildren,
+  badgeProps,
+}: SlideProps) {
+  const badge = kind === "cta" && layout.badge?.enabled ? layout.badge : null;
   const { block, span } = textStyle(layout.style, kind);
   const { x, y, w } = layout.box;
 
@@ -45,6 +67,29 @@ export function Slide({ kind, layout, text, imageUrl, imageCrop, showSafeArea, t
         >
           <span style={span}>{text}</span>
           {textBoxChildren}
+        </div>
+      )}
+
+      {badge && (
+        <div
+          {...badgeProps}
+          style={{
+            position: "absolute",
+            left: (badge.x - badge.w / 2) * CANVAS.width,
+            top: badge.y * CANVAS.height,
+            width: badge.w * CANVAS.width,
+            height: (badge.w * CANVAS.width) / BADGE_ASPECT,
+            transform: "translateY(-50%)",
+            ...badgeProps?.style,
+          }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element -- rendered to an image, needs a plain <img> */}
+          <img
+            src={BADGE_SRC}
+            alt="Download on the App Store"
+            draggable={false}
+            style={{ width: "100%", height: "100%", display: "block", filter: badge.variant === "light" ? "invert(1)" : undefined }}
+          />
         </div>
       )}
 

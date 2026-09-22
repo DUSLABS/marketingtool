@@ -9,6 +9,12 @@ export type TextAlign = "left" | "center" | "right";
 
 export type TextBox = { x: number; y: number; w: number };
 
+/** App Store badge on the CTA slide; x/y is its centre, w its width (canvas fractions). */
+export type BadgeLayout = { enabled: boolean; variant: "dark" | "light"; x: number; y: number; w: number };
+
+export const BADGE_SRC = "/badges/app-store.png";
+export const BADGE_ASPECT = 1124 / 336;
+
 export type SlideLayout = {
   libraryId: string | null;
   style: TextStyleId;
@@ -16,6 +22,10 @@ export type SlideLayout = {
   box: TextBox;
   /** Darkening overlay over the image, 0–0.7. */
   dim: number;
+  /** CTA slide only. */
+  badge?: BadgeLayout;
+  /** CTA slide only: after the content slides, or in the middle of them. */
+  placement?: "end" | "middle";
 };
 
 export type CampaignLayout = Record<SlideKind, SlideLayout>;
@@ -23,15 +33,32 @@ export type CampaignLayout = Record<SlideKind, SlideLayout>;
 export const DEFAULT_LAYOUT: CampaignLayout = {
   hook: { libraryId: null, style: "classic", align: "center", box: { x: 0.5, y: 0.4, w: 0.84 }, dim: 0.15 },
   content: { libraryId: null, style: "classic", align: "center", box: { x: 0.5, y: 0.45, w: 0.84 }, dim: 0.2 },
-  cta: { libraryId: null, style: "box", align: "center", box: { x: 0.5, y: 0.3, w: 0.8 }, dim: 0 },
+  cta: {
+    libraryId: null,
+    style: "box",
+    align: "center",
+    box: { x: 0.5, y: 0.3, w: 0.8 },
+    dim: 0,
+    badge: { enabled: false, variant: "dark", x: 0.5, y: 0.6, w: 0.44 },
+    placement: "end",
+  },
 };
 
 export function withDefaults(layout: Partial<CampaignLayout> | null | undefined): CampaignLayout {
   return {
     hook: { ...DEFAULT_LAYOUT.hook, ...layout?.hook },
     content: { ...DEFAULT_LAYOUT.content, ...layout?.content },
-    cta: { ...DEFAULT_LAYOUT.cta, ...layout?.cta },
+    cta: {
+      ...DEFAULT_LAYOUT.cta,
+      ...layout?.cta,
+      badge: { ...DEFAULT_LAYOUT.cta.badge!, ...layout?.cta?.badge },
+    },
   };
+}
+
+/** Index in the post where the CTA slide goes, given the number of content slides. */
+export function ctaPosition(placement: SlideLayout["placement"], contentCount: number) {
+  return placement === "middle" ? 1 + Math.ceil(contentCount / 2) : 1 + contentCount;
 }
 
 /** Regions covered by TikTok's UI in the For You feed (approximate), as canvas fractions. */

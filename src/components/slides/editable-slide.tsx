@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, type PointerEvent } from "react";
-import { CANVAS, type ImageCrop, type SlideKind, type SlideLayout, type TextBox } from "@/lib/slides/types";
+import { CANVAS, type BadgeLayout, type ImageCrop, type SlideKind, type SlideLayout, type TextBox } from "@/lib/slides/types";
 import { ScaledSlide, Slide } from "./slide";
 
 const SNAP = 0.015;
@@ -9,7 +9,7 @@ const MIN_W = 0.3;
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 
-type Drag = { mode: "move" | "left" | "right"; startX: number; startY: number; box: TextBox };
+type Drag = { mode: "move" | "left" | "right" | "badge"; startX: number; startY: number; box: TextBox; badge?: BadgeLayout };
 
 /** A scaled slide whose text box can be dragged (position) and resized (width) with the pointer. */
 export function EditableSlide({
@@ -21,6 +21,7 @@ export function EditableSlide({
   imageCrop,
   showSafeArea,
   onBoxChange,
+  onBadgeChange,
 }: {
   width: number;
   kind: SlideKind;
@@ -30,6 +31,8 @@ export function EditableSlide({
   imageCrop?: ImageCrop | null;
   showSafeArea: boolean;
   onBoxChange: (box: TextBox) => void;
+  /** Makes the CTA's App Store badge draggable. */
+  onBadgeChange?: (badge: BadgeLayout) => void;
 }) {
   const drag = useRef<Drag | null>(null);
   const height = width * (CANVAS.height / CANVAS.width);
@@ -38,7 +41,7 @@ export function EditableSlide({
     e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
     const mode = (e.currentTarget.dataset.drag ?? "move") as Drag["mode"];
-    drag.current = { mode, startX: e.clientX, startY: e.clientY, box: layout.box };
+    drag.current = { mode, startX: e.clientX, startY: e.clientY, box: layout.box, badge: layout.badge };
   }
 
   function move(e: PointerEvent) {
@@ -47,7 +50,11 @@ export function EditableSlide({
     const dx = (e.clientX - d.startX) / width;
     const dy = (e.clientY - d.startY) / height;
 
-    if (d.mode === "move") {
+    if (d.mode === "badge" && d.badge) {
+      let x = clamp(d.badge.x + dx, d.badge.w / 2, 1 - d.badge.w / 2);
+      if (Math.abs(x - 0.5) < SNAP) x = 0.5;
+      onBadgeChange?.({ ...d.badge, x, y: clamp(d.badge.y + dy, 0.04, 0.96) });
+    } else if (d.mode === "move") {
       let x = clamp(d.box.x + dx, d.box.w / 2, 1 - d.box.w / 2);
       if (Math.abs(x - 0.5) < SNAP) x = 0.5;
       onBoxChange({ ...d.box, x, y: clamp(d.box.y + dy, 0.04, 0.96) });
@@ -104,6 +111,15 @@ export function EditableSlide({
             {handle("left")}
             {handle("right")}
           </>
+        }
+        badgeProps={
+          onBadgeChange && {
+            "data-drag": "badge",
+            onPointerDown: start,
+            onPointerMove: move,
+            onPointerUp: end,
+            style: { cursor: "move", outline: "4px dashed rgba(91,255,183,.85)", outlineOffset: 10, touchAction: "none" },
+          } as React.HTMLAttributes<HTMLDivElement>
         }
       />
     </ScaledSlide>

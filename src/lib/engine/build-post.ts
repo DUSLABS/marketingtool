@@ -2,7 +2,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { generateContentSlides, researchTopic, type CampaignContext, type ProductContext } from "@/lib/ai/generate";
-import { withDefaults, type CampaignLayout, type SlideKind, type SlideLayout } from "@/lib/slides/types";
+import { ctaPosition, withDefaults, type CampaignLayout, type SlideKind, type SlideLayout } from "@/lib/slides/types";
 
 // Builds one post from a campaign's rules: rotate hook/CTA, write fresh content, pick images.
 // Runs with the admin client (also used by the scheduler), so every query is scoped to the workspace.
@@ -108,8 +108,10 @@ export async function buildPost(
   const planned: PlannedSlide[] = [
     { kind: "hook", text: hook.text, ...snapshot("hook") },
     ...contentTexts.map((text) => ({ kind: "content" as const, text, ...snapshot("content") })),
-    ...(c.cta_enabled ? [{ kind: "cta" as const, text: cta?.text ?? "", ...snapshot("cta") }] : []),
   ];
+  if (c.cta_enabled) {
+    planned.splice(ctaPosition(layout.cta.placement, contentTexts.length), 0, { kind: "cta", text: cta?.text ?? "", ...snapshot("cta") });
+  }
 
   // ─── Images ──────────────────────────────────────────────────────────────
   const libraryIds = [...new Set(planned.map((s) => s.libraryId))];
