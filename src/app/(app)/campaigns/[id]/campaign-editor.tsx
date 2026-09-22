@@ -1,17 +1,38 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
-import { ArrowLeft, Images, MoreHorizontal, Shuffle, Sparkles, Type } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Eye,
+  GalleryHorizontalEnd,
+  ImageIcon,
+  Images,
+  MoreHorizontal,
+  Palette,
+  PanelRightClose,
+  PanelRightOpen,
+  Send,
+  Sparkles,
+  Type,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Segmented, selectClass } from "@/components/app/segmented";
@@ -29,6 +50,7 @@ import {
   type CopyItem,
   type Slot,
 } from "../actions";
+import { generateAndSendPost, generatePost } from "./posts/actions";
 import { CopyList } from "./copy-list";
 import { PublishSettings, type PublishAccount } from "./publish-settings";
 
@@ -66,18 +88,18 @@ type Props = {
   libraries: EditorLibrary[];
   accounts: PublishAccount[];
   slots: Slot[];
+  postCount: number;
 };
 
-type Tab = SlideKind | "publish";
-
-const TABS: { value: Tab; label: string }[] = [
+const TABS: { value: SlideKind; label: string }[] = [
   { value: "hook", label: "Hook" },
   { value: "content", label: "Content" },
   { value: "cta", label: "CTA" },
-  { value: "publish", label: "Publish" },
 ];
 
 const AUTOSAVE_MS = 600;
+const CARD_WIDTH = 176; // 7 slides (hook, 5 content, CTA) fit side by side on a ~1440px wide screen
+const ORDINALS = ["first", "second", "third", "4th", "5th", "6th", "7th", "8th", "9th", "10th"];
 
 /** Local campaign state with debounced saves; flush() forces pending changes to the server. */
 function useAutosave(initial: EditorCampaign) {
@@ -128,55 +150,83 @@ function useAutosave(initial: EditorCampaign) {
   return { campaign, patch, flush, status };
 }
 
-export function CampaignEditor({ campaign: initial, hooks: initialHooks, ctas: initialCtas, products, libraries, accounts, slots }: Props) {
+type StripSlide = { kind: SlideKind; index: number; text: string; placeholder: boolean };
+
+export function CampaignEditor({
+  campaign: initial,
+  hooks: initialHooks,
+  ctas: initialCtas,
+  products,
+  libraries,
+  accounts,
+  slots,
+  postCount,
+}: Props) {
+  const router = useRouter();
   const { campaign, patch, flush, status } = useAutosave(initial);
   const [hooks, setHooks] = useState(initialHooks);
   const [ctas, setCtas] = useState(initialCtas);
-  const [tab, setTab] = useState<Tab>("hook");
-  const [contentIndex, setContentIndex] = useState(0);
+  const [tab, setTab] = useState<SlideKind>("hook");
+  const [selected, setSelected] = useState<{ kind: SlideKind; index: number }>({ kind: "hook", index: 0 });
   const [previewHookId, setPreviewHookId] = useState<string | null>(null);
   const [previewCtaId, setPreviewCtaId] = useState<string | null>(null);
   const [previewSlides, setPreviewSlides] = useState<string[] | null>(null);
-  const [seed, setSeed] = useState(0);
   const [showSafeArea, setShowSafeArea] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(true);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [aiBusy, startAi] = useTransition();
+  const [postBusy, startPost] = useTransition();
+  const [postAction, setPostAction] = useState<"generate" | "send" | null>(null);
 
   const layout = campaign.layout;
   const setKindLayout = (kind: SlideKind, p: Partial<SlideLayout>) =>
     patch({ layout: { ...layout, [kind]: { ...layout[kind], ...p } } });
 
-  // ─── Preview content ──────────────────────────────────────────────────────
-  const hookText =
-    hooks.find((h) => h.id === previewHookId)?.text ?? hooks.find((h) => h.enabled)?.text ?? "Your hook goes here";
+  // ─── Slides shown in the strip ────────────────────────────────────────────
+  const enabledHooks = hooks.filter((h) => h.enabled);
+  const hookText = hooks.find((h) => h.id === previewHookId)?.text ?? enabledHooks[0]?.text ?? "";
   const ctaText = ctas.find((c) => c.id === previewCtaId)?.text ?? ctas.find((c) => c.enabled)?.text ?? "";
   const contentTexts = Array.from({ length: campaign.content_slide_count }, (_, i) => {
-    if (previewSlides?.[i]) return previewSlides[i];
+    if (previewSlides?.[i]) return { text: previewSlides[i], placeholder: false };
     const prefix = { numbered: `${i + 1}. `, steps: `Step ${i + 1}: `, plain: "" }[campaign.content_format];
-    return `${prefix}Content slide ${i + 1} appears here`;
+    return { text: `${prefix}Your ${ORDINALS[i]} point, plus the one detail that makes it land`, placeholder: true };
   });
 
-  const imagesFor = (kind: SlideKind) => libraries.find((l) => l.id === layout[kind].libraryId)?.images ?? [];
+  const strip: StripSlide[] = [
+    { kind: "hook", index: 0, text: hookText || "Your hook goes here", placeholder: !hookText },
+    ...contentTexts.map((c, index) => ({ kind: "content" as const, index, ...c })),
+    ...(campaign.cta_enabled ? [{ kind: "cta" as const, index: 0, text: ctaText, placeholder: false }] : []),
+  ];
+
   const imageAt = (kind: SlideKind, index: number) => {
-    const images = imagesFor(kind);
-    return images.length ? images[(seed + index) % images.length] : null;
+    const images = libraries.find((l) => l.id === layout[kind].libraryId)?.images ?? [];
+    return images.length ? images[index % images.length] : null;
   };
 
-  const strip: { kind: SlideKind; index: number; text: string }[] = [
-    { kind: "hook", index: 0, text: hookText },
-    ...contentTexts.map((text, index) => ({ kind: "content" as const, index, text })),
-    ...(campaign.cta_enabled ? [{ kind: "cta" as const, index: 0, text: ctaText }] : []),
-  ];
-  const active =
-    tab === "content" ? strip[1 + Math.min(contentIndex, contentTexts.length - 1)] : (strip.find((s) => s.kind === tab) ?? strip[0]);
+  function select(kind: SlideKind, index: number) {
+    setSelected({ kind, index });
+    setTab(kind);
+  }
 
+  function selectTab(kind: SlideKind) {
+    setTab(kind);
+    setSelected({ kind, index: 0 });
+  }
+
+  function cycleHook() {
+    if (enabledHooks.length < 2) return;
+    const i = enabledHooks.findIndex((h) => h.text === hookText);
+    setPreviewHookId(enabledHooks[(i + 1) % enabledHooks.length].id);
+  }
+
+  // ─── Actions ──────────────────────────────────────────────────────────────
   function generatePreview() {
     startAi(async () => {
       await flush();
-      const res = await aiPreviewContent(campaign.id, hookText);
+      const res = await aiPreviewContent(campaign.id, hookText || "A useful slideshow for this topic");
       if (!res.ok) return void toast.error(res.error);
       setPreviewSlides(res.data);
-      setTab("content");
-      setContentIndex(0);
+      select("content", 0);
     });
   }
 
@@ -190,51 +240,61 @@ export function CampaignEditor({ campaign: initial, hooks: initialHooks, ctas: i
     });
   }
 
+  const postsHref = `/campaigns/${campaign.id}/posts`;
+
+  function runPost(kind: "generate" | "send") {
+    setPostAction(kind);
+    startPost(async () => {
+      await flush();
+      const res = kind === "send" ? await generateAndSendPost(campaign.id) : await generatePost(campaign.id);
+      setPostAction(null);
+      if (!res.ok) return void toast.error(res.error, { duration: 10_000 });
+      toast.success(kind === "send" ? "Post sent to TikTok" : "New post ready", {
+        action: { label: "View", onClick: () => router.push(postsHref) },
+      });
+    });
+  }
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-wrap items-center gap-3">
-        <Link href="/campaigns" className="rounded-lg p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground" aria-label="Back">
+    <div className="space-y-5">
+      {/* ─── Header ─────────────────────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Link href="/campaigns" className="rounded-lg p-2 text-muted-foreground hover:bg-secondary hover:text-foreground" aria-label="Back">
           <ArrowLeft className="size-4" />
         </Link>
         <Input
           value={campaign.name}
           onChange={(e) => patch({ name: e.target.value })}
-          className="h-9 max-w-sm border-transparent bg-transparent text-lg font-semibold dark:bg-transparent hover:border-border"
+          className="h-9 w-72 text-base font-medium"
+          aria-label="Campaign name"
         />
-        <span className="text-xs text-muted-foreground">
-          {status === "saving" ? "Saving…" : status === "error" ? "Not saved" : "Saved"}
+        <span className="flex h-9 items-center gap-2 rounded-lg border border-border px-3 text-sm text-muted-foreground">
+          <GalleryHorizontalEnd className="size-4" /> Slideshow
         </span>
+        <StyleMenu layout={layout} onApply={(p) => patch({ layout: { hook: { ...layout.hook, ...p }, content: { ...layout.content, ...p }, cta: { ...layout.cta, ...p } } })} />
+
         <div className="ml-auto flex items-center gap-2">
-          <select
-            value={campaign.product_id ?? ""}
-            onChange={(e) => patch({ product_id: e.target.value || null })}
-            className={selectClass}
-            aria-label="Product"
-          >
-            <option value="">No product</option>
-            {products.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-          <select
-            value={campaign.language}
-            onChange={(e) => patch({ language: e.target.value })}
-            className={selectClass}
-            aria-label="Language"
-          >
-            <option value="en">English</option>
-            <option value="de">German</option>
-          </select>
-          <Link
-            href={`/campaigns/${campaign.id}/posts`}
-            onClick={() => void flush()}
-            className={cn(buttonVariants(), "glow-hover")}
-          >
-            <Sparkles /> Posts & generate
+          <span className="px-1 text-sm text-muted-foreground">
+            {status === "saving" ? "Saving…" : status === "error" ? "Not saved" : "Saved"}
+          </span>
+          <Button variant="outline" className="h-9" onClick={() => setPreviewOpen(true)}>
+            <Eye /> Preview
+          </Button>
+          <Link href={postsHref} onClick={() => void flush()} className={cn(buttonVariants({ variant: "outline" }), "h-9")}>
+            Posts{postCount ? ` (${postCount})` : ""}
           </Link>
+          <Button
+            variant="outline"
+            className="h-9"
+            disabled={postBusy || !campaign.tiktok_account_id}
+            title={campaign.tiktok_account_id ? "Generate a post and send it to TikTok now" : "Choose a TikTok account in Settings first"}
+            onClick={() => runPost("send")}
+          >
+            <Send className={cn(postAction === "send" && "animate-pulse")} /> {postAction === "send" ? "Sending…" : "Send to TikTok"}
+          </Button>
+          <Button className={cn("h-9", postBusy ? "glow" : "glow-hover")} disabled={postBusy} onClick={() => runPost("generate")}>
+            <Sparkles className={cn(postAction === "generate" && "animate-pulse")} /> {postAction === "generate" ? "Generating…" : "Generate"}
+          </Button>
           <DropdownMenu>
             <DropdownMenuTrigger render={<Button variant="ghost" size="icon" aria-label="Campaign options" />}>
               <MoreHorizontal />
@@ -255,15 +315,53 @@ export function CampaignEditor({ campaign: initial, hooks: initialHooks, ctas: i
         </div>
       </div>
 
-      <div className="grid items-start gap-6 xl:grid-cols-[1fr_360px]">
-        {/* Editor */}
+      {/* ─── Slide strip ────────────────────────────────────────────────────── */}
+      <div className="rounded-2xl border border-border bg-[radial-gradient(var(--line)_1px,transparent_1px)] [background-size:16px_16px] p-5">
+        <div className="flex gap-4 overflow-x-auto pb-2">
+          {strip.map((s, i) => {
+            const isSelected = selected.kind === s.kind && (s.kind !== "content" || selected.index === s.index);
+            return (
+              <SlideCard
+                key={`${s.kind}-${s.index}`}
+                number={i + 1}
+                slide={s}
+                layout={layout[s.kind]}
+                imageUrl={imageAt(s.kind, s.index)}
+                libraries={libraries}
+                inTab={s.kind === tab}
+                selected={isSelected}
+                showSafeArea={showSafeArea}
+                label={s.kind === "hook" ? `Hook · ${enabledHooks.length} rotating` : s.kind === "cta" ? "CTA" : "Content"}
+                onSelect={() => select(s.kind, s.index)}
+                onBoxChange={(box) => setKindLayout(s.kind, { box })}
+                onLibrary={(libraryId) => setKindLayout(s.kind, { libraryId })}
+                onEye={s.kind === "hook" ? cycleHook : undefined}
+              />
+            );
+          })}
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 text-xs text-muted-foreground">
+          <span>Click a slide to edit it. Drag its text to move it; pull the green handles to change the width.</span>
+          <div className="flex items-center gap-3">
+            <button className={cn("hover:text-foreground", showSafeArea && "text-primary")} onClick={() => setShowSafeArea((v) => !v)}>
+              TikTok safe area
+            </button>
+            <button className="text-primary hover:underline disabled:opacity-50" onClick={generatePreview} disabled={aiBusy}>
+              {aiBusy ? "Writing sample content…" : "✦ Fill with sample content"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ─── Editor + settings ──────────────────────────────────────────────── */}
+      <div className={cn("grid items-start gap-5", settingsOpen && "xl:grid-cols-[1fr_400px]")}>
         <section className="panel">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4">
             <div className="flex rounded-xl bg-secondary p-1">
               {TABS.map((t) => (
                 <button
                   key={t.value}
-                  onClick={() => setTab(t.value)}
+                  onClick={() => selectTab(t.value)}
                   className={cn(
                     "rounded-lg px-4 py-1.5 text-sm transition-colors",
                     tab === t.value ? "bg-primary font-medium text-primary-foreground" : "text-muted-foreground hover:text-foreground",
@@ -273,9 +371,19 @@ export function CampaignEditor({ campaign: initial, hooks: initialHooks, ctas: i
                 </button>
               ))}
             </div>
-            {tab !== "publish" && (
-              <KindToolbar layout={layout[tab]} libraries={libraries} onChange={(p) => setKindLayout(tab, p)} />
-            )}
+            <div className="flex items-center gap-2">
+              <LibraryPicker
+                libraryId={layout[tab].libraryId}
+                libraries={libraries}
+                onChange={(libraryId) => setKindLayout(tab, { libraryId })}
+              />
+              <TextStylePicker value={layout[tab].style} onChange={(style) => setKindLayout(tab, { style })} />
+              {!settingsOpen && (
+                <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)} aria-label="Show settings">
+                  <PanelRightOpen />
+                </Button>
+              )}
+            </div>
           </div>
 
           <div className="space-y-6 p-5">
@@ -286,19 +394,16 @@ export function CampaignEditor({ campaign: initial, hooks: initialHooks, ctas: i
                 items={hooks}
                 onItemsChange={setHooks}
                 previewId={previewHookId}
-                onPreview={setPreviewHookId}
+                onPreview={(id) => {
+                  setPreviewHookId(id);
+                  select("hook", 0);
+                }}
                 beforeAi={flush}
               />
             )}
 
             {tab === "content" && (
-              <ContentSettings
-                campaign={campaign}
-                patch={patch}
-                aiBusy={aiBusy}
-                onOptimize={optimizePrompt}
-                onGenerate={generatePreview}
-              />
+              <ContentSettings campaign={campaign} patch={patch} aiBusy={aiBusy} onOptimize={optimizePrompt} onGenerate={generatePreview} />
             )}
 
             {tab === "cta" && (
@@ -320,143 +425,335 @@ export function CampaignEditor({ campaign: initial, hooks: initialHooks, ctas: i
                       items={ctas}
                       onItemsChange={setCtas}
                       previewId={previewCtaId}
-                      onPreview={setPreviewCtaId}
+                      onPreview={(id) => {
+                        setPreviewCtaId(id);
+                        select("cta", 0);
+                      }}
                       beforeAi={flush}
                     />
                     <p className="text-xs text-muted-foreground">
-                      Tip: use app screenshots with the App Store badge as CTA images. Without any CTA text the slide shows
-                      only the image.
+                      Tip: use app screenshots with the App Store badge as CTA images. Without any CTA text the slide shows only
+                      the image.
                     </p>
                   </>
                 )}
               </div>
             )}
 
-            {tab === "publish" && (
-              <PublishSettings campaign={campaign} patch={patch} accounts={accounts} slots={slots} beforeStart={flush} />
-            )}
-
-            {tab !== "publish" && <LayoutControls layout={layout[tab]} onChange={(p) => setKindLayout(tab, p)} />}
+            <LayoutControls layout={layout[tab]} onChange={(p) => setKindLayout(tab, p)} />
           </div>
         </section>
 
-        {/* Preview */}
-        <aside className="panel space-y-4 p-4 xl:sticky xl:top-6">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-medium">Preview</p>
-            <div className="flex items-center gap-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowSafeArea((v) => !v)}
-                className={cn(showSafeArea && "text-primary")}
-                title="Areas covered by TikTok's buttons and caption"
-              >
-                Safe area
-              </Button>
-              <Button variant="ghost" size="icon-sm" onClick={() => setSeed((s) => s + 1 + Math.floor(Math.random() * 7))} aria-label="Shuffle images" title="Shuffle images">
-                <Shuffle />
+        {settingsOpen && (
+          <aside className="panel xl:sticky xl:top-6">
+            <div className="flex items-center justify-between border-b border-border p-4">
+              <p className="font-medium">Settings</p>
+              <Button variant="ghost" size="icon-sm" onClick={() => setSettingsOpen(false)} aria-label="Hide settings">
+                <PanelRightClose />
               </Button>
             </div>
-          </div>
+            <div className="space-y-6 p-5">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label className="text-muted-foreground">Product</Label>
+                  <select
+                    value={campaign.product_id ?? ""}
+                    onChange={(e) => patch({ product_id: e.target.value || null })}
+                    className={cn(selectClass, "w-full")}
+                  >
+                    <option value="">No product</option>
+                    {products.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-muted-foreground">Language</Label>
+                  <select value={campaign.language} onChange={(e) => patch({ language: e.target.value })} className={cn(selectClass, "w-full")}>
+                    <option value="en">English</option>
+                    <option value="de">German</option>
+                  </select>
+                </div>
+              </div>
+              <PublishSettings campaign={campaign} patch={patch} accounts={accounts} slots={slots} beforeStart={flush} />
+            </div>
+          </aside>
+        )}
+      </div>
 
-          <div className="flex justify-center">
-            <EditableSlide
-              width={300}
-              kind={active.kind}
-              layout={layout[active.kind]}
-              text={active.text}
-              imageUrl={imageAt(active.kind, active.index)}
-              showSafeArea={showSafeArea}
-              onBoxChange={(box) => setKindLayout(active.kind, { box })}
-            />
-          </div>
-          <p className="text-center text-xs text-muted-foreground">
-            Drag the text to move it, pull the green handles to change its width. Applies to every {active.kind} slide.
-          </p>
+      <PreviewDialog
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        slides={strip.map((s) => ({ ...s, layout: layout[s.kind], imageUrl: imageAt(s.kind, s.index) }))}
+      />
+    </div>
+  );
+}
 
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            {strip.map((s, i) => {
-              const isActive = s === active;
-              return (
-                <button
-                  key={`${s.kind}-${s.index}`}
-                  onClick={() => {
-                    setTab(s.kind);
-                    if (s.kind === "content") setContentIndex(s.index);
-                  }}
-                  className={cn("shrink-0 rounded-[10px] ring-offset-2 ring-offset-card", isActive ? "ring-2 ring-primary" : "opacity-70 hover:opacity-100")}
-                  aria-label={`Slide ${i + 1}`}
-                >
-                  <ScaledSlide width={56}>
-                    <Slide kind={s.kind} layout={layout[s.kind]} text={s.text} imageUrl={imageAt(s.kind, s.index)} />
-                  </ScaledSlide>
-                </button>
-              );
-            })}
-          </div>
-          {!previewSlides && (
-            <Button variant="outline" size="sm" className="w-full text-primary" onClick={generatePreview} disabled={aiBusy}>
-              <Sparkles className={cn(aiBusy && "animate-pulse")} /> {aiBusy ? "Writing…" : "Generate sample content"}
-            </Button>
-          )}
-        </aside>
+// ─── Slide card in the strip ───────────────────────────────────────────────
+
+function SlideCard({
+  number,
+  slide,
+  layout,
+  imageUrl,
+  libraries,
+  inTab,
+  selected,
+  showSafeArea,
+  label,
+  onSelect,
+  onBoxChange,
+  onLibrary,
+  onEye,
+}: {
+  number: number;
+  slide: StripSlide;
+  layout: SlideLayout;
+  imageUrl: string | null;
+  libraries: EditorLibrary[];
+  inTab: boolean;
+  selected: boolean;
+  showSafeArea: boolean;
+  label: string;
+  onSelect: () => void;
+  onBoxChange: (box: SlideLayout["box"]) => void;
+  onLibrary: (libraryId: string | null) => void;
+  onEye?: () => void;
+}) {
+  const faded = slide.placeholder ? { opacity: 0.55 } : undefined;
+  return (
+    <div
+      onClick={onSelect}
+      className={cn(
+        "relative shrink-0 cursor-pointer overflow-hidden rounded-2xl border-2 bg-card transition-colors",
+        inTab ? "border-primary/80" : "border-border hover:border-muted-foreground/40",
+        selected && "glow",
+      )}
+      style={{ width: CARD_WIDTH + 4 }}
+    >
+      <div className="relative" style={faded}>
+        {selected ? (
+          <EditableSlide
+            width={CARD_WIDTH}
+            kind={slide.kind}
+            layout={layout}
+            text={slide.text}
+            imageUrl={imageUrl}
+            showSafeArea={showSafeArea}
+            onBoxChange={onBoxChange}
+          />
+        ) : (
+          <ScaledSlide width={CARD_WIDTH}>
+            <Slide kind={slide.kind} layout={layout} text={slide.text} imageUrl={imageUrl} showSafeArea={showSafeArea} />
+          </ScaledSlide>
+        )}
+      </div>
+
+      <span className="absolute top-2 left-2 flex size-6 items-center justify-center rounded-md bg-black/60 text-xs font-medium text-white">
+        {number}
+      </span>
+      <div className="absolute top-2 right-2 flex gap-1" onClick={(e) => e.stopPropagation()}>
+        {onEye && (
+          <button
+            onClick={onEye}
+            className="flex size-7 items-center justify-center rounded-md bg-black/60 text-white hover:text-primary"
+            title="Show the next hook"
+            aria-label="Show the next hook"
+          >
+            <Eye className="size-4" />
+          </button>
+        )}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className={cn(
+              "flex size-7 items-center justify-center rounded-md bg-black/60 hover:text-primary",
+              layout.libraryId ? "text-white" : "text-destructive",
+            )}
+            aria-label="Image library"
+            title="Image library"
+          >
+            <ImageIcon className="size-4" />
+          </DropdownMenuTrigger>
+          <LibraryMenuContent libraryId={layout.libraryId} libraries={libraries} onChange={onLibrary} />
+        </DropdownMenu>
+      </div>
+
+      <div className={cn("border-t border-border px-3 py-2 text-sm", inTab ? "font-medium text-foreground" : "text-muted-foreground")}>
+        {label}
       </div>
     </div>
   );
 }
 
-function KindToolbar({
-  layout,
+// ─── Pickers ───────────────────────────────────────────────────────────────
+
+function LibraryMenuContent({
+  libraryId,
   libraries,
   onChange,
 }: {
-  layout: SlideLayout;
+  libraryId: string | null;
   libraries: EditorLibrary[];
-  onChange: (p: Partial<SlideLayout>) => void;
+  onChange: (id: string | null) => void;
 }) {
-  const library = libraries.find((l) => l.id === layout.libraryId);
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <label
-        className={cn(
-          "flex h-8 items-center gap-2 rounded-lg border pl-2.5 text-sm",
-          library ? "border-primary/60" : "border-destructive/60",
+    <DropdownMenuContent align="end" className="min-w-56">
+      <DropdownMenuGroup>
+        <DropdownMenuLabel>Image library</DropdownMenuLabel>
+        {libraries.length === 0 && (
+          <DropdownMenuItem render={<Link href="/library" />}>Create a library first →</DropdownMenuItem>
         )}
-      >
-        <Images className="size-4 text-muted-foreground" />
-        <select
-          value={layout.libraryId ?? ""}
-          onChange={(e) => onChange({ libraryId: e.target.value || null })}
-          className="h-full bg-transparent pr-2 outline-none [&>option]:bg-popover"
-          aria-label="Image library"
-        >
-          <option value="">Choose library…</option>
-          {libraries.map((l) => (
-            <option key={l.id} value={l.id}>
-              {l.name} ({l.images.length})
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="flex h-8 items-center gap-2 rounded-lg border border-border pl-2.5 text-sm">
-        <Type className="size-4 text-muted-foreground" />
-        <select
-          value={layout.style}
-          onChange={(e) => onChange({ style: e.target.value as TextStyleId })}
-          className="h-full bg-transparent pr-2 outline-none [&>option]:bg-popover"
-          aria-label="Text style"
-        >
-          {Object.entries(TEXT_STYLES).map(([id, s]) => (
-            <option key={id} value={id}>
-              {s.label}
-            </option>
-          ))}
-        </select>
-      </label>
-    </div>
+        {libraries.map((l) => (
+          <DropdownMenuItem key={l.id} onClick={() => onChange(l.id)} className={cn(l.id === libraryId && "text-primary")}>
+            <Images /> {l.name} <span className="ml-auto text-xs text-muted-foreground">{l.images.length}</span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuGroup>
+      {libraryId && (
+        <>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={() => onChange(null)}>Detach library</DropdownMenuItem>
+        </>
+      )}
+    </DropdownMenuContent>
   );
 }
+
+function LibraryPicker({
+  libraryId,
+  libraries,
+  onChange,
+}: {
+  libraryId: string | null;
+  libraries: EditorLibrary[];
+  onChange: (id: string | null) => void;
+}) {
+  const library = libraries.find((l) => l.id === libraryId);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant="outline"
+            className={cn("h-9", library ? "border-primary/60" : "border-destructive/70 text-destructive hover:text-destructive")}
+          />
+        }
+      >
+        <Images /> {library ? `${library.name} (${library.images.length})` : "Attach image library"} <ChevronDown className="opacity-60" />
+      </DropdownMenuTrigger>
+      <LibraryMenuContent libraryId={libraryId} libraries={libraries} onChange={onChange} />
+    </DropdownMenu>
+  );
+}
+
+function TextStylePicker({ value, onChange }: { value: TextStyleId; onChange: (style: TextStyleId) => void }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger render={<Button variant="outline" className="h-9" />}>
+        <Type /> {TEXT_STYLES[value].label} <ChevronDown className="opacity-60" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-64">
+        {(Object.keys(TEXT_STYLES) as TextStyleId[]).map((id) => (
+          <DropdownMenuItem key={id} onClick={() => onChange(id)} className={cn("flex-col items-start gap-0", id === value && "text-primary")}>
+            <span>{TEXT_STYLES[id].label}</span>
+            <span className="text-xs text-muted-foreground">{TEXT_STYLES[id].description}</span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** Header "Style" menu: applies a look to every slide type at once. */
+function StyleMenu({ layout, onApply }: { layout: CampaignLayout; onApply: (p: Partial<SlideLayout>) => void }) {
+  const uniform = layout.hook.style === layout.content.style && layout.content.style === layout.cta.style;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger render={<Button variant="outline" className="h-9" />}>
+        <Palette /> Style {uniform && <span className="text-muted-foreground">· {TEXT_STYLES[layout.hook.style].label}</span>}
+        <ChevronDown className="opacity-60" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="min-w-64">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Apply to all slides</DropdownMenuLabel>
+          {(Object.keys(TEXT_STYLES) as TextStyleId[]).map((id) => (
+            <DropdownMenuItem key={id} onClick={() => onApply({ style: id })} className="flex-col items-start gap-0">
+              <span>{TEXT_STYLES[id].label}</span>
+              <span className="text-xs text-muted-foreground">{TEXT_STYLES[id].description}</span>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Text alignment</DropdownMenuLabel>
+          {(["left", "center", "right"] as TextAlign[]).map((align) => (
+            <DropdownMenuItem key={align} onClick={() => onApply({ align })} className="capitalize">
+              {align}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+// ─── Preview ───────────────────────────────────────────────────────────────
+
+function PreviewDialog({
+  open,
+  onOpenChange,
+  slides,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  slides: (StripSlide & { layout: SlideLayout; imageUrl: string | null })[];
+}) {
+  const [index, setIndex] = useState(0);
+  const i = Math.min(index, slides.length - 1);
+  const slide = slides[i];
+  const go = (delta: number) => setIndex((i + delta + slides.length) % slides.length);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="w-auto max-w-none gap-3 p-4 sm:max-w-none"
+        onKeyDown={(e) => {
+          if (e.key === "ArrowRight") go(1);
+          if (e.key === "ArrowLeft") go(-1);
+        }}
+      >
+        <DialogTitle className="sr-only">Preview</DialogTitle>
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="icon" onClick={() => go(-1)} aria-label="Previous slide">
+            <ChevronLeft />
+          </Button>
+          <div className="relative">
+            <ScaledSlide width={340}>
+              <Slide kind={slide.kind} layout={slide.layout} text={slide.text} imageUrl={slide.imageUrl} />
+            </ScaledSlide>
+            {/* TikTok-style photo mode dots */}
+            <div className="absolute inset-x-0 bottom-3 flex justify-center gap-1">
+              {slides.map((_, n) => (
+                <span key={n} className={cn("h-1 rounded-full bg-white transition-all", n === i ? "w-4" : "w-1 opacity-50")} />
+              ))}
+            </div>
+          </div>
+          <Button variant="ghost" size="icon" onClick={() => go(1)} aria-label="Next slide">
+            <ChevronRight />
+          </Button>
+        </div>
+        <p className="text-center text-xs text-muted-foreground tabular-nums">
+          {i + 1} / {slides.length} · use ← → to swipe
+        </p>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Panels ────────────────────────────────────────────────────────────────
 
 function LayoutControls({ layout, onChange }: { layout: SlideLayout; onChange: (p: Partial<SlideLayout>) => void }) {
   return (
@@ -516,14 +813,12 @@ function ContentSettings({
         </div>
         <Textarea
           id="content_prompt"
-          rows={4}
+          rows={3}
           value={campaign.content_prompt}
           onChange={(e) => patch({ content_prompt: e.target.value })}
           placeholder="e.g. Unconventional ways to get more candid photos at your wedding. Every tip must be practical and specific."
         />
-        <p className="text-xs text-muted-foreground">
-          Be specific: vague prompts produce vague slides. The content is written fresh for every post.
-        </p>
+        <p className="text-xs text-muted-foreground">Be specific: vague prompts produce vague slides. The content is written fresh for every post.</p>
       </div>
 
       <div className="flex flex-wrap gap-x-10 gap-y-5">
@@ -603,7 +898,7 @@ function ContentSettings({
       </div>
 
       <Button variant="outline" className="text-primary" onClick={onGenerate} disabled={aiBusy}>
-        <Sparkles className={cn(aiBusy && "animate-pulse")} /> {aiBusy ? "Writing…" : "Generate sample content for the preview"}
+        <Sparkles className={cn(aiBusy && "animate-pulse")} /> {aiBusy ? "Writing…" : "Fill slides with sample content"}
       </Button>
     </div>
   );

@@ -16,7 +16,7 @@ export default async function CampaignPage({ params }: PageProps<"/campaigns/[id
   const { data: campaign } = await supabase.from("campaigns").select("*").eq("id", id).maybeSingle();
   if (!campaign) notFound();
 
-  const [hooks, ctas, products, libraries, accounts, slots] = await Promise.all([
+  const [hooks, ctas, products, libraries, accounts, slots, posts] = await Promise.all([
     supabase.from("campaign_hooks").select("id, text, enabled, source, style").eq("campaign_id", id).order("created_at"),
     supabase.from("campaign_ctas").select("id, text, enabled, source").eq("campaign_id", id).order("created_at"),
     supabase.from("products").select("id, name").order("created_at"),
@@ -27,6 +27,7 @@ export default async function CampaignPage({ params }: PageProps<"/campaigns/[id
       .limit(SAMPLES_PER_LIBRARY, { foreignTable: "library_assets" }),
     supabase.from("tiktok_accounts").select("id, username, display_name, status").order("created_at"),
     supabase.from("schedule_slots").select("id, time_of_day, weekdays").eq("campaign_id", id).order("time_of_day"),
+    supabase.from("posts").select("id", { count: "exact", head: true }).eq("campaign_id", id),
   ]);
   for (const r of [hooks, ctas, products, libraries, accounts, slots]) if (r.error) throw r.error;
 
@@ -83,6 +84,7 @@ export default async function CampaignPage({ params }: PageProps<"/campaigns/[id
         status: a.status,
       }))}
       slots={slots.data ?? []}
+      postCount={posts.count ?? 0}
     />
   );
 }

@@ -123,3 +123,12 @@ export async function refreshPostStatus(postId: string): Promise<ActionResult<st
     return { ok: false, error: publishErrorMessage(e) };
   }
 }
+
+/** "Send to TikTok" in the editor: builds a fresh post and sends it right away. */
+export async function generateAndSendPost(campaignId: string): Promise<ActionResult<string>> {
+  const generated = await generatePost(campaignId);
+  if (!generated.ok) return generated;
+  const sent = await sendPostToTikTok(generated.data);
+  if (!sent.ok) return { ok: false, error: `Post created, but sending failed: ${sent.error}` };
+  return sent;
+}
