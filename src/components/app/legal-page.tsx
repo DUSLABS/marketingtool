@@ -1,7 +1,17 @@
 import type { ReactNode } from "react";
 
-// TODO(legal): fill in the operator's legal name, address and contact email before submitting the TikTok app.
-export const OPERATOR = { name: "DUSLABS", address: "[Address]", email: "[contact@yourdomain.com]" };
+export const OPERATOR = {
+  name: "Florian Nowak & Maximilian Förster GbR",
+  brand: "DUSLABS",
+  partners: ["Florian Nowak", "Maximilian Förster"],
+  street: "Walter-Eucken-Straße 105",
+  city: "40235 Düsseldorf",
+  country: "Germany",
+  email: "hello@duslabs.de",
+  phone: "+49 17238192040",
+};
+
+export const OPERATOR_ADDRESS = `${OPERATOR.street}, ${OPERATOR.city}, ${OPERATOR.country}`;
 
 export function LegalPage({ title, updated, children }: { title: string; updated: string; children: ReactNode }) {
   return (

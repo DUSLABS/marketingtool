@@ -45,7 +45,7 @@ export default async function LandingPage() {
           TikTok slideshows for our apps, created and scheduled in one place.
         </h1>
         <p className="mt-5 max-w-xl text-muted-foreground">
-          Slides Autopilot is used by the {OPERATOR.name} team to create photo slideshow posts and publish them to our
+          Slides Autopilot is used by the {OPERATOR.brand} team to create photo slideshow posts and publish them to our
           own TikTok accounts. Access is limited to invited team members.
         </p>
 
@@ -67,12 +67,15 @@ export default async function LandingPage() {
       </main>
 
       <footer className="flex flex-wrap gap-x-6 gap-y-2 border-t border-border py-6 text-sm text-muted-foreground">
-        <span>© 2026 {OPERATOR.name}</span>
+        <span>© 2026 {OPERATOR.brand}</span>
         <Link href="/privacy" className="hover:text-foreground">
           Privacy Policy
         </Link>
         <Link href="/terms" className="hover:text-foreground">
           Terms of Service
+        </Link>
+        <Link href="/imprint" className="hover:text-foreground">
+          Imprint
         </Link>
         <a href={`mailto:${OPERATOR.email}`} className="hover:text-foreground">
           Contact
