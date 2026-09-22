@@ -210,3 +210,35 @@ Search the web and return 5-8 short, verifiable facts (with the number where the
     .join("")
     .trim();
 }
+
+/** Rewrites one slide of an existing post so it still fits the others. */
+export async function rewriteSlide(input: {
+  product: ProductContext | null;
+  campaign: CampaignContext;
+  slides: { kind: "hook" | "content" | "cta"; text: string }[];
+  index: number;
+}) {
+  const { campaign, slides, index } = input;
+  const target = slides[index];
+  const [min, max] = LENGTH_WORDS[campaign.contentLength];
+  const rules = {
+    hook: "It is the hook: under 12 words, it must still promise what the content slides deliver.",
+    content: `It is a content slide: ${min}-${max} words, same numbering/format as the other content slides, one idea that is not already covered by the other slides.`,
+    cta: "It is the call to action: names the product, under 10 words, a natural next step rather than an ad.",
+  }[target.kind];
+
+  const { text } = await parse(
+    z.object({ text: z.string() }),
+    `${productBlock(input.product)}
+
+${campaignBlock(campaign)}
+
+<post>
+${slides.map((s, i) => `Slide ${i + 1} (${s.kind}): ${s.text || "(image only)"}`).join("\n")}
+</post>
+
+Rewrite slide ${index + 1}. ${rules} Make it clearly different from the current version.`,
+    1500,
+  );
+  return text.trim();
+}

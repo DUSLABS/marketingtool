@@ -53,6 +53,7 @@ import {
 import { generateAndSendPost, generatePost } from "./posts/actions";
 import { CopyList } from "./copy-list";
 import { PublishSettings, type PublishAccount } from "./publish-settings";
+import { PostEditorDialog } from "./post-editor";
 
 export type EditorCampaign = {
   id: string;
@@ -177,6 +178,7 @@ export function CampaignEditor({
   const [aiBusy, startAi] = useTransition();
   const [postBusy, startPost] = useTransition();
   const [postAction, setPostAction] = useState<"generate" | "send" | null>(null);
+  const [generatedPost, setGeneratedPost] = useState<{ id: string | null; generating: boolean } | null>(null);
 
   const layout = campaign.layout;
   const setKindLayout = (kind: SlideKind, p: Partial<SlideLayout>) =>
@@ -244,14 +246,19 @@ export function CampaignEditor({
 
   function runPost(kind: "generate" | "send") {
     setPostAction(kind);
+    // "Generate" opens the preview right away and fills it once the post is rendered.
+    if (kind === "generate") setGeneratedPost({ id: null, generating: true });
     startPost(async () => {
       await flush();
       const res = kind === "send" ? await generateAndSendPost(campaign.id) : await generatePost(campaign.id);
       setPostAction(null);
-      if (!res.ok) return void toast.error(res.error, { duration: 10_000 });
-      toast.success(kind === "send" ? "Post sent to TikTok" : "New post ready", {
-        action: { label: "View", onClick: () => router.push(postsHref) },
-      });
+      if (!res.ok) {
+        setGeneratedPost(null);
+        return void toast.error(res.error, { duration: 10_000 });
+      }
+      if (kind === "generate") setGeneratedPost({ id: res.data, generating: false });
+      else toast.success("Post sent to TikTok", { action: { label: "View", onClick: () => router.push(postsHref) } });
+      router.refresh();
     });
   }
 
@@ -482,6 +489,14 @@ export function CampaignEditor({
           </aside>
         )}
       </div>
+
+      <PostEditorDialog
+        postId={generatedPost?.id ?? null}
+        generating={generatedPost?.generating}
+        canSend={!!campaign.tiktok_account_id}
+        onOpenChange={(open) => !open && !generatedPost?.generating && setGeneratedPost(null)}
+        onChanged={() => router.refresh()}
+      />
 
       <PreviewDialog
         open={previewOpen}

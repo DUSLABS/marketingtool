@@ -3,13 +3,13 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { ArrowLeft, ChevronLeft, ChevronRight, Copy, Download, RefreshCw, Send, Sparkles, Trash2 } from "lucide-react";
+import { ArrowLeft, Copy, Download, RefreshCw, Send, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { PostEditorDialog } from "../post-editor";
 import { deletePost, generatePost, refreshPostStatus, rerenderPost, sendPostToTikTok, updatePostCaption } from "./actions";
 
 export type PostSummary = {
@@ -44,13 +44,16 @@ const TIKTOK_STATUS: Record<string, string> = {
 export function PostsView({ campaign, posts }: { campaign: { id: string; name: string; hasAccount: boolean }; posts: PostSummary[] }) {
   const router = useRouter();
   const [generating, startGenerating] = useTransition();
-  const [viewer, setViewer] = useState<{ post: PostSummary; index: number } | null>(null);
+  const [editing, setEditing] = useState<{ id: string | null; generating: boolean } | null>(null);
 
   function generate() {
+    setEditing({ id: null, generating: true });
     startGenerating(async () => {
       const res = await generatePost(campaign.id);
-      if (!res.ok) toast.error(res.error, { duration: 10_000 });
-      else toast.success("New post ready");
+      if (!res.ok) {
+        setEditing(null);
+        toast.error(res.error, { duration: 10_000 });
+      } else setEditing({ id: res.data, generating: false });
       router.refresh();
     });
   }
@@ -83,16 +86,22 @@ export function PostsView({ campaign, posts }: { campaign: { id: string; name: s
 
       <div className="space-y-4">
         {posts.map((post) => (
-          <PostCard key={post.id} post={post} canSend={campaign.hasAccount} onOpen={(index) => setViewer({ post, index })} />
+          <PostCard key={post.id} post={post} canSend={campaign.hasAccount} onOpen={() => setEditing({ id: post.id, generating: false })} />
         ))}
       </div>
 
-      <SlideViewer viewer={viewer} onChange={setViewer} />
+      <PostEditorDialog
+        postId={editing?.id ?? null}
+        generating={editing?.generating}
+        canSend={campaign.hasAccount}
+        onOpenChange={(open) => !open && !editing?.generating && setEditing(null)}
+        onChanged={() => router.refresh()}
+      />
     </div>
   );
 }
 
-function PostCard({ post, canSend, onOpen }: { post: PostSummary; canSend: boolean; onOpen: (index: number) => void }) {
+function PostCard({ post, canSend, onOpen }: { post: PostSummary; canSend: boolean; onOpen: () => void }) {
   const router = useRouter();
   const [caption, setCaption] = useState(post.caption);
   const [busy, startBusy] = useTransition();
@@ -181,10 +190,10 @@ function PostCard({ post, canSend, onOpen }: { post: PostSummary; canSend: boole
       {post.error && <p className="text-sm text-destructive">{post.error}</p>}
 
       <div className="flex gap-2 overflow-x-auto pb-1">
-        {post.slides.map((s, i) => (
+        {post.slides.map((s) => (
           <button
             key={s.id}
-            onClick={() => onOpen(i)}
+            onClick={onOpen}
             className="relative aspect-[9/16] w-28 shrink-0 overflow-hidden rounded-lg border border-border bg-secondary hover:border-primary/60"
             title={s.text}
           >
@@ -222,47 +231,5 @@ function PostCard({ post, canSend, onOpen }: { post: PostSummary; canSend: boole
         />
       </div>
     </article>
-  );
-}
-
-function SlideViewer({
-  viewer,
-  onChange,
-}: {
-  viewer: { post: PostSummary; index: number } | null;
-  onChange: (v: { post: PostSummary; index: number } | null) => void;
-}) {
-  if (!viewer) return null;
-  const { post, index } = viewer;
-  const slide = post.slides[index];
-  const go = (delta: number) =>
-    onChange({ post, index: (index + delta + post.slides.length) % post.slides.length });
-
-  return (
-    <Dialog open onOpenChange={(open) => !open && onChange(null)}>
-      <DialogContent className="w-auto max-w-none p-3 sm:max-w-none" onKeyDown={(e) => {
-        if (e.key === "ArrowRight") go(1);
-        if (e.key === "ArrowLeft") go(-1);
-      }}>
-        <DialogTitle className="sr-only">Slide {index + 1}</DialogTitle>
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" onClick={() => go(-1)} aria-label="Previous slide">
-            <ChevronLeft />
-          </Button>
-          {slide.url ? (
-            // eslint-disable-next-line @next/next/no-img-element -- signed Supabase URL of the final render
-            <img src={slide.url} alt={slide.text} className="h-[80vh] rounded-lg" />
-          ) : (
-            <div className="flex h-[80vh] w-[45vh] items-center justify-center rounded-lg bg-secondary p-6 text-center">{slide.text}</div>
-          )}
-          <Button variant="ghost" size="icon" onClick={() => go(1)} aria-label="Next slide">
-            <ChevronRight />
-          </Button>
-        </div>
-        <p className="text-center text-xs text-muted-foreground tabular-nums">
-          {index + 1} / {post.slides.length}
-        </p>
-      </DialogContent>
-    </Dialog>
   );
 }
