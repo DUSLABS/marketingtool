@@ -4,7 +4,7 @@
 export const ACCEPTED_IMAGE_TYPES = "image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif";
 
 const MAX_EDGE = 3000; // leaves room to crop/zoom into a 1080×1920 slide
-const THUMB_EDGE = 480;
+const THUMB_EDGE = 720; // sharp enough for the editor preview
 
 export type ProcessedImage = {
   full: Blob;

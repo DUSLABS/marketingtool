@@ -66,7 +66,7 @@ Da wir mehrere Apps haben: Entität **Product** (Name, Beschreibung, **belegte F
 |---|---|
 | App | Next.js (App Router, TypeScript), Tailwind, shadcn/ui, dnd-kit |
 | Backend | Supabase: Postgres, Auth (invite-only), Storage, RLS |
-| AI | Claude API mit Structured Outputs; Sonnet für Content/Captions, Haiku für Rewrites |
+| AI | Claude API (`claude-opus-5`, effort `medium`) mit Structured Outputs und serverseitigem Fallback bei Ablehnungen (`src/lib/ai/generate.ts`) |
 | Web-Recherche (optional pro Kampagne) | Claude Web Search Tool |
 | Rendering | Eine React-Slide-Komponente (1080×1920) für Editor **und** Server; Server rendert per Headless Chromium (`@sparticuz/chromium` + `playwright-core`) → identische Zeilenumbrüche. Fonts liegen im Repo. |
 | Scheduler | Supabase `pg_cron` ruft alle 5 Min eine geschützte API-Route (`/api/cron/tick`) per `pg_net` auf |
