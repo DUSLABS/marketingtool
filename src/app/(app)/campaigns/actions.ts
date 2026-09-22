@@ -191,6 +191,7 @@ export async function aiPreviewContent(campaignId: string, hook: string) {
     const research = webResearch
       ? await researchTopic({ topic: campaign.contentPrompt, hook, language: campaign.language })
       : undefined;
-    return generateContentSlides({ product, campaign, hook, research });
+    const { slides } = await generateContentSlides({ product, campaign, hook, research });
+    return slides;
   });
 }

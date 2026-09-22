@@ -1,6 +1,9 @@
 import type { CSSProperties } from "react";
 import type { SlideKind, TextStyleId } from "./types";
 
+// Font families registered by @fontsource (see app/layout.tsx and lib/render/fonts.ts).
+export const SLIDE_FONTS = { sans: "Inter", serif: "'DM Serif Display'" } as const;
+
 // Font sizes are canvas pixels (1080 wide). Hooks are set larger than body slides.
 const SIZE: Record<SlideKind, number> = { hook: 76, content: 58, cta: 60 };
 
@@ -15,7 +18,7 @@ export const TEXT_STYLES: Record<TextStyleId, { label: string; description: stri
 export function textStyle(style: TextStyleId, kind: SlideKind): { block: CSSProperties; span: CSSProperties } {
   const size = SIZE[kind];
   const base: CSSProperties = {
-    fontFamily: "var(--font-slide-sans), system-ui, sans-serif",
+    fontFamily: `${SLIDE_FONTS.sans}, system-ui, sans-serif`,
     fontSize: size,
     fontWeight: 800,
     lineHeight: 1.18,
@@ -48,7 +51,7 @@ export function textStyle(style: TextStyleId, kind: SlideKind): { block: CSSProp
       return {
         block: {
           ...base,
-          fontFamily: "var(--font-slide-serif), Georgia, serif",
+          fontFamily: `${SLIDE_FONTS.serif}, Georgia, serif`,
           fontWeight: 400,
           fontSize: Math.round(size * 1.15),
           lineHeight: 1.1,

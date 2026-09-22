@@ -6,6 +6,8 @@ import type { CopyItem } from "../actions";
 import { CampaignEditor, type EditorCampaign, type EditorLibrary } from "./campaign-editor";
 
 const SAMPLES_PER_LIBRARY = 24;
+// Generating a post (AI + rendering) can run from this page too.
+export const maxDuration = 300;
 
 export default async function CampaignPage({ params }: PageProps<"/campaigns/[id]">) {
   const { id } = await params;

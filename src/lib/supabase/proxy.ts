@@ -2,7 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 // Paths reachable without a session (TikTok app review needs the landing and legal pages public).
-const PUBLIC_PATHS = ["/login", "/privacy", "/terms", "/imprint"];
+const PUBLIC_PATHS = ["/login", "/privacy", "/terms", "/imprint", "/render/"];
 
 function isPublic(pathname: string) {
   return pathname === "/" || PUBLIC_PATHS.some((p) => pathname.startsWith(p));

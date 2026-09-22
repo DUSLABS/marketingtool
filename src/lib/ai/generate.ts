@@ -148,21 +148,26 @@ export async function generateContentSlides(input: {
     plain: "No numbering; each slide is a single sentence or two short ones.",
   }[campaign.contentFormat];
 
-  const { slides } = await parse(
-    z.object({ slides: z.array(z.string()) }),
+  // One named field per slide: structured outputs then guarantees exactly N slides (a plain
+  // array can't be length-constrained and the model sometimes adds an extra item).
+  const slideKeys = Array.from({ length: campaign.contentSlideCount }, (_, i) => `slide_${i + 1}`);
+  const output = await parse(
+    z.object({
+      ...Object.fromEntries(slideKeys.map((k) => [k, z.string()])),
+      caption: z.string(),
+    }) as z.ZodType<Record<string, string>>,
     `${productBlock(input.product)}
 
 ${campaignBlock(campaign)}
 ${input.research ? `\n<research>\n${input.research}\n</research>\nYou may use facts from the research above, including numbers, but only where they appear there.\n` : ""}
 <hook>${input.hook}</hook>
 
-Write the ${campaign.contentSlideCount} content slides that follow this hook and deliver exactly what it promises. ${format} Each slide has ${min}-${max} words. Content slides give value on their own; mention the product at most once, and only if it fits naturally.`,
+Write the ${campaign.contentSlideCount} content slides (slide_1 … slide_${campaign.contentSlideCount}) that follow this hook and deliver exactly what it promises. ${format} Each slide has ${min}-${max} words. Content slides give value on their own; mention the product at most once, and only if it fits naturally.
+
+Also write the TikTok caption for this post: one or two short sentences that make people swipe through, followed by 3-5 relevant hashtags. Emojis are fine in the caption only.`,
   );
 
-  if (slides.length !== campaign.contentSlideCount) {
-    throw new Error(`Expected ${campaign.contentSlideCount} slides, got ${slides.length}. Try again.`);
-  }
-  return slides;
+  return { slides: slideKeys.map((k) => output[k].trim()), caption: output.caption.trim() };
 }
 
 export async function optimizeContentPrompt(input: { product: ProductContext | null; prompt: string; language: string }) {

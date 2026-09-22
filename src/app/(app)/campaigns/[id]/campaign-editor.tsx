@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { ArrowLeft, Images, MoreHorizontal, Shuffle, Sparkles, Type } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -212,6 +212,13 @@ export function CampaignEditor({ campaign: initial, hooks: initialHooks, ctas: i
             <option value="en">English</option>
             <option value="de">German</option>
           </select>
+          <Link
+            href={`/campaigns/${campaign.id}/posts`}
+            onClick={() => void flush()}
+            className={cn(buttonVariants(), "glow-hover")}
+          >
+            <Sparkles /> Posts & generate
+          </Link>
           <DropdownMenu>
             <DropdownMenuTrigger render={<Button variant="ghost" size="icon" aria-label="Campaign options" />}>
               <MoreHorizontal />
