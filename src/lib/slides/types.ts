@@ -34,5 +34,24 @@ export function withDefaults(layout: Partial<CampaignLayout> | null | undefined)
   };
 }
 
-/** Regions covered by TikTok's UI in photo mode (approximate), as canvas fractions. */
+/** Regions covered by TikTok's UI in the For You feed (approximate), as canvas fractions. */
 export const SAFE_AREA = { top: 0.09, bottom: 0.22, right: 0.14, left: 0.04 } as const;
+
+/**
+ * In the post view (opened from a profile, caption below the photo) TikTok shows only about a
+ * 3:4 window from the top: everything below this fraction of the height is cut off.
+ */
+export const POST_VIEW_VISIBLE = 0.75;
+
+/** How an image is framed inside the 9:16 slide: zoom and pan (fractions of the canvas). */
+export type ImageCrop = { zoom: number; x: number; y: number };
+
+export const DEFAULT_CROP: ImageCrop = { zoom: 1, x: 0, y: 0 };
+
+/** Keeps the pan within what the zoom allows, so the image always covers the slide. */
+export function clampCrop(crop: ImageCrop): ImageCrop {
+  const zoom = Math.min(2.5, Math.max(1, crop.zoom));
+  const max = (zoom - 1) / 2;
+  const clamp = (v: number) => Math.min(max, Math.max(-max, v));
+  return { zoom, x: clamp(crop.x), y: clamp(crop.y) };
+}

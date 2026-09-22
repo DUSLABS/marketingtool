@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition, type DragEvent } from "react";
-import { Check, FolderPlus, ImagePlus, Lock, MoreHorizontal, Star, Trash2, Upload, X } from "lucide-react";
+import { Check, Crop, FolderPlus, ImagePlus, Lock, MoreHorizontal, Star, Trash2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +17,8 @@ import {
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { ACCEPTED_IMAGE_TYPES, processImage } from "@/lib/image-processing";
+import type { ImageCrop } from "@/lib/slides/types";
+import { CropDialog } from "./crop-dialog";
 import {
   createLibrary,
   deleteAssets,
@@ -38,6 +40,7 @@ export type LibraryAsset = {
   height: number | null;
   favorite: boolean;
   locked: boolean;
+  crop: ImageCrop | null;
 };
 
 type Props = {
@@ -55,6 +58,7 @@ export function LibraryView({ workspaceId, libraries, selected, assets, totalCou
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [upload, setUpload] = useState<{ done: number; total: number } | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [cropping, setCropping] = useState<LibraryAsset | null>(null);
   const [, startTransition] = useTransition();
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -280,11 +284,22 @@ export function LibraryView({ workspaceId, libraries, selected, assets, totalCou
                 selected={selection.has(asset.id)}
                 onToggle={() => toggle(asset.id)}
                 onFlag={(flags) => run(() => setAssetFlags(asset.id, flags))}
+                onCrop={() => setCropping(asset)}
               />
             ))}
           </div>
         )}
       </section>
+
+      {cropping?.thumbUrl && (
+        <CropDialog
+          asset={{ id: cropping.id, thumbUrl: cropping.thumbUrl, crop: cropping.crop }}
+          onClose={() => {
+            setCropping(null);
+            router.refresh();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -397,12 +412,15 @@ function AssetTile({
   selected,
   onToggle,
   onFlag,
+  onCrop,
 }: {
   asset: LibraryAsset;
   selected: boolean;
   onToggle: () => void;
   onFlag: (flags: { favorite?: boolean; locked?: boolean }) => void;
+  onCrop: () => void;
 }) {
+  const crop = asset.crop ?? { zoom: 1, x: 0, y: 0 };
   return (
     <div
       className={cn(
@@ -413,7 +431,14 @@ function AssetTile({
     >
       {asset.thumbUrl && (
         // eslint-disable-next-line @next/next/no-img-element -- signed Supabase URLs, already resized thumbnails
-        <img src={asset.thumbUrl} alt="" loading="lazy" className="size-full object-cover" onClick={onToggle} />
+        <img
+          src={asset.thumbUrl}
+          alt=""
+          loading="lazy"
+          className="size-full object-cover"
+          style={{ transform: `translate(${crop.x * 100}%, ${crop.y * 100}%) scale(${crop.zoom})` }}
+          onClick={onToggle}
+        />
       )}
 
       <button
@@ -430,6 +455,9 @@ function AssetTile({
       </button>
 
       <div className="absolute right-2 bottom-2 flex gap-1">
+        <FlagButton active={!!asset.crop} label="Adjust framing for 9:16 slides" onClick={onCrop}>
+          <Crop className="size-3.5" />
+        </FlagButton>
         <FlagButton
           active={asset.favorite}
           label={asset.favorite ? "Unfavorite" : "Favorite: used more often"}

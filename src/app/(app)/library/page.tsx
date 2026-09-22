@@ -1,6 +1,7 @@
 import { PageHeader } from "@/components/app/page-header";
 import { getWorkspace } from "@/lib/workspace";
 import { signPaths } from "@/lib/storage";
+import type { ImageCrop } from "@/lib/slides/types";
 import { LibraryView, type LibraryAsset, type LibrarySummary } from "./library-view";
 
 export const metadata = { title: "Library" };
@@ -12,9 +13,10 @@ type AssetRow = {
   height: number | null;
   favorite: boolean;
   locked: boolean;
+  crop: ImageCrop | null;
 };
 
-const ASSET_COLUMNS = "id, thumb_path, width, height, favorite, locked";
+const ASSET_COLUMNS = "id, thumb_path, width, height, favorite, locked, crop";
 
 export default async function LibraryPage({ searchParams }: PageProps<"/library">) {
   const { l } = await searchParams;
@@ -59,6 +61,7 @@ export default async function LibraryPage({ searchParams }: PageProps<"/library"
     height: r.height,
     favorite: r.favorite,
     locked: r.locked,
+    crop: r.crop,
   }));
 
   return (

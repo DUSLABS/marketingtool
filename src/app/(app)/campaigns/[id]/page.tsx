@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { getWorkspace } from "@/lib/workspace";
 import { signPaths } from "@/lib/storage";
-import { withDefaults, type CampaignLayout } from "@/lib/slides/types";
+import { withDefaults, type CampaignLayout, type ImageCrop } from "@/lib/slides/types";
 import type { CopyItem } from "../actions";
 import { CampaignEditor, type EditorCampaign, type EditorLibrary } from "./campaign-editor";
 
@@ -22,7 +22,7 @@ export default async function CampaignPage({ params }: PageProps<"/campaigns/[id
     supabase.from("products").select("id, name").order("created_at"),
     supabase
       .from("libraries")
-      .select(`id, name, library_assets(asset:assets(thumb_path, locked))`)
+      .select(`id, name, library_assets(asset:assets(thumb_path, crop, locked))`)
       .order("created_at")
       .limit(SAMPLES_PER_LIBRARY, { foreignTable: "library_assets" }),
     supabase.from("tiktok_accounts").select("id, username, display_name, status").order("created_at"),
@@ -35,16 +35,16 @@ export default async function CampaignPage({ params }: PageProps<"/campaigns/[id
   const libraryRows = (libraries.data ?? []).map((lib) => ({
     id: lib.id as string,
     name: lib.name as string,
-    paths: (lib.library_assets as unknown as { asset: { thumb_path: string | null; locked: boolean } | null }[])
+    assets: (lib.library_assets as unknown as { asset: { thumb_path: string | null; crop: ImageCrop | null; locked: boolean } | null }[])
       .map((la) => la.asset)
       .filter((a) => a && !a.locked && a.thumb_path)
-      .map((a) => a!.thumb_path!),
+      .map((a) => ({ path: a!.thumb_path!, crop: a!.crop })),
   }));
-  const urls = await signPaths(supabase, "assets", libraryRows.flatMap((l) => l.paths));
+  const urls = await signPaths(supabase, "assets", libraryRows.flatMap((l) => l.assets.map((a) => a.path)));
   const editorLibraries: EditorLibrary[] = libraryRows.map((l) => ({
     id: l.id,
     name: l.name,
-    images: l.paths.map((p) => urls.get(p)).filter((u): u is string => !!u),
+    images: l.assets.filter((a) => urls.has(a.path)).map((a) => ({ url: urls.get(a.path)!, crop: a.crop })),
   }));
 
   const editorCampaign: EditorCampaign = {

@@ -10,7 +10,7 @@ import { renderPost } from "@/lib/engine/render-post";
 import { publishErrorMessage, publishPost, syncPublishStatus } from "@/lib/engine/publish-post";
 import { rewriteSlide, type CampaignContext, type ProductContext } from "@/lib/ai/generate";
 import { signPaths } from "@/lib/storage";
-import { withDefaults, type SlideKind, type SlideLayout } from "@/lib/slides/types";
+import { withDefaults, type ImageCrop, type SlideKind, type SlideLayout } from "@/lib/slides/types";
 
 export type ActionResult<T = void> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -145,6 +145,7 @@ export type EditorSlide = {
   layout: Omit<SlideLayout, "libraryId">;
   assetId: string | null;
   imageUrl: string | null;
+  imageCrop: ImageCrop | null;
 };
 
 export type EditorPost = {
@@ -162,14 +163,14 @@ type SlideRow = {
   kind: SlideKind;
   text: string;
   layout: Omit<SlideLayout, "libraryId">;
-  asset: { id: string; thumb_path: string | null } | null;
+  asset: { id: string; thumb_path: string | null; crop: ImageCrop | null } | null;
 };
 
 export async function getPostForEditor(postId: string): Promise<ActionResult<EditorPost>> {
   const { supabase } = await getWorkspace();
   const { data: post, error } = await supabase
     .from("posts")
-    .select("id, campaign_id, status, caption, tiktok_publish_id, post_slides(id, position, kind, text, layout, asset:assets(id, thumb_path))")
+    .select("id, campaign_id, status, caption, tiktok_publish_id, post_slides(id, position, kind, text, layout, asset:assets(id, thumb_path, crop))")
     .eq("id", postId)
     .single();
   if (error || !post) return { ok: false, error: "Post not found" };
@@ -191,6 +192,7 @@ export async function getPostForEditor(postId: string): Promise<ActionResult<Edi
         layout: r.layout,
         assetId: r.asset?.id ?? null,
         imageUrl: r.asset?.thumb_path ? (urls.get(r.asset.thumb_path) ?? null) : null,
+        imageCrop: r.asset?.crop ?? null,
       })),
     },
   };
@@ -248,7 +250,7 @@ export async function pickOtherImage(
   postId: string,
   kind: SlideKind,
   excludeAssetIds: string[],
-): Promise<ActionResult<{ assetId: string; imageUrl: string | null }>> {
+): Promise<ActionResult<{ assetId: string; imageUrl: string | null; imageCrop: ImageCrop | null }>> {
   const { supabase } = await getWorkspace();
   const { data: post } = await supabase.from("posts").select("campaign:campaigns(layout)").eq("id", postId).single();
   const libraryId = withDefaults((post?.campaign as unknown as { layout: never } | null)?.layout)[kind].libraryId;
@@ -256,17 +258,20 @@ export async function pickOtherImage(
 
   const { data: rows } = await supabase
     .from("library_assets")
-    .select("asset:assets!inner(id, thumb_path, locked)")
+    .select("asset:assets!inner(id, thumb_path, crop, locked)")
     .eq("library_id", libraryId)
     .eq("asset.locked", false);
   const candidates = (rows ?? [])
-    .map((r) => r.asset as unknown as { id: string; thumb_path: string | null })
+    .map((r) => r.asset as unknown as { id: string; thumb_path: string | null; crop: ImageCrop | null })
     .filter((a) => !excludeAssetIds.includes(a.id));
   if (!candidates.length) return { ok: false, error: "No other images in this library." };
 
   const pick = candidates[Math.floor(Math.random() * candidates.length)];
   const urls = await signPaths(supabase, "assets", [pick.thumb_path]);
-  return { ok: true, data: { assetId: pick.id, imageUrl: pick.thumb_path ? (urls.get(pick.thumb_path) ?? null) : null } };
+  return {
+    ok: true,
+    data: { assetId: pick.id, imageUrl: pick.thumb_path ? (urls.get(pick.thumb_path) ?? null) : null, imageCrop: pick.crop },
+  };
 }
 
 /** Saves edited slides and caption, then re-renders the post. */

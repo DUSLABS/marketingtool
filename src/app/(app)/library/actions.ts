@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getWorkspace } from "@/lib/workspace";
+import { clampCrop, type ImageCrop } from "@/lib/slides/types";
 
 export async function createLibrary(name: string) {
   const { supabase, workspaceId } = await getWorkspace();
@@ -105,6 +106,13 @@ export async function unlinkAssets(assetIds: string[], libraryId: string) {
 export async function setAssetFlags(id: string, flags: { favorite?: boolean; locked?: boolean }) {
   const { supabase } = await getWorkspace();
   const { error } = await supabase.from("assets").update(flags).eq("id", id);
+  if (error) throw error;
+  revalidatePath("/library");
+}
+
+export async function setAssetCrop(id: string, crop: ImageCrop | null) {
+  const { supabase } = await getWorkspace();
+  const { error } = await supabase.from("assets").update({ crop: crop && clampCrop(crop) }).eq("id", id);
   if (error) throw error;
   revalidatePath("/library");
 }

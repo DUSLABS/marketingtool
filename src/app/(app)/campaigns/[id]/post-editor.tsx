@@ -90,7 +90,7 @@ export function PostEditorDialog({
     const res = await pickOtherImage(post!.id, slides[index].kind, used);
     setBusySlide(null);
     if (!res.ok) return void toast.error(res.error);
-    updateSlide(index, { assetId: res.data.assetId, imageUrl: res.data.imageUrl });
+    updateSlide(index, { assetId: res.data.assetId, imageUrl: res.data.imageUrl, imageCrop: res.data.imageCrop });
   }
 
   async function save() {
@@ -170,6 +170,7 @@ export function PostEditorDialog({
                           layout={{ ...slide.layout, libraryId: null }}
                           text={slide.text}
                           imageUrl={slide.imageUrl}
+                          imageCrop={slide.imageCrop}
                           showSafeArea={showSafeArea}
                           onBoxChange={(box) => updateSlide(i, { layout: { ...slide.layout, box } })}
                         />
@@ -180,6 +181,7 @@ export function PostEditorDialog({
                             layout={{ ...slide.layout, libraryId: null }}
                             text={slide.text}
                             imageUrl={slide.imageUrl}
+                            imageCrop={slide.imageCrop}
                             showSafeArea={showSafeArea}
                           />
                         </ScaledSlide>

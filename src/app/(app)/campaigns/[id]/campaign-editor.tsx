@@ -39,7 +39,7 @@ import { Segmented, selectClass } from "@/components/app/segmented";
 import { EditableSlide } from "@/components/slides/editable-slide";
 import { ScaledSlide, Slide } from "@/components/slides/slide";
 import { TEXT_STYLES } from "@/lib/slides/styles";
-import type { CampaignLayout, SlideKind, SlideLayout, TextAlign, TextStyleId } from "@/lib/slides/types";
+import type { CampaignLayout, ImageCrop, SlideKind, SlideLayout, TextAlign, TextStyleId } from "@/lib/slides/types";
 import { cn } from "@/lib/utils";
 import {
   aiOptimizePrompt,
@@ -79,7 +79,8 @@ export type EditorCampaign = {
   max_posts_per_day: number;
 };
 
-export type EditorLibrary = { id: string; name: string; images: string[] };
+export type EditorImage = { url: string; crop: ImageCrop | null };
+export type EditorLibrary = { id: string; name: string; images: EditorImage[] };
 
 type Props = {
   campaign: EditorCampaign;
@@ -333,7 +334,7 @@ export function CampaignEditor({
                 number={i + 1}
                 slide={s}
                 layout={layout[s.kind]}
-                imageUrl={imageAt(s.kind, s.index)}
+                image={imageAt(s.kind, s.index)}
                 libraries={libraries}
                 inTab={s.kind === tab}
                 selected={isSelected}
@@ -501,7 +502,7 @@ export function CampaignEditor({
       <PreviewDialog
         open={previewOpen}
         onOpenChange={setPreviewOpen}
-        slides={strip.map((s) => ({ ...s, layout: layout[s.kind], imageUrl: imageAt(s.kind, s.index) }))}
+        slides={strip.map((s) => ({ ...s, layout: layout[s.kind], image: imageAt(s.kind, s.index) }))}
       />
     </div>
   );
@@ -513,7 +514,7 @@ function SlideCard({
   number,
   slide,
   layout,
-  imageUrl,
+  image,
   libraries,
   inTab,
   selected,
@@ -527,7 +528,7 @@ function SlideCard({
   number: number;
   slide: StripSlide;
   layout: SlideLayout;
-  imageUrl: string | null;
+  image: EditorImage | null;
   libraries: EditorLibrary[];
   inTab: boolean;
   selected: boolean;
@@ -556,13 +557,21 @@ function SlideCard({
             kind={slide.kind}
             layout={layout}
             text={slide.text}
-            imageUrl={imageUrl}
+            imageUrl={image?.url ?? null}
+            imageCrop={image?.crop}
             showSafeArea={showSafeArea}
             onBoxChange={onBoxChange}
           />
         ) : (
           <ScaledSlide width={CARD_WIDTH}>
-            <Slide kind={slide.kind} layout={layout} text={slide.text} imageUrl={imageUrl} showSafeArea={showSafeArea} />
+            <Slide
+              kind={slide.kind}
+              layout={layout}
+              text={slide.text}
+              imageUrl={image?.url ?? null}
+              imageCrop={image?.crop}
+              showSafeArea={showSafeArea}
+            />
           </ScaledSlide>
         )}
       </div>
@@ -724,7 +733,7 @@ function PreviewDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  slides: (StripSlide & { layout: SlideLayout; imageUrl: string | null })[];
+  slides: (StripSlide & { layout: SlideLayout; image: EditorImage | null })[];
 }) {
   const [index, setIndex] = useState(0);
   const i = Math.min(index, slides.length - 1);
@@ -747,7 +756,13 @@ function PreviewDialog({
           </Button>
           <div className="relative">
             <ScaledSlide width={340}>
-              <Slide kind={slide.kind} layout={slide.layout} text={slide.text} imageUrl={slide.imageUrl} />
+              <Slide
+                kind={slide.kind}
+                layout={slide.layout}
+                text={slide.text}
+                imageUrl={slide.image?.url ?? null}
+                imageCrop={slide.image?.crop}
+              />
             </ScaledSlide>
             {/* TikTok-style photo mode dots */}
             <div className="absolute inset-x-0 bottom-3 flex justify-center gap-1">

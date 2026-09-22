@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, type PointerEvent } from "react";
-import { CANVAS, type SlideKind, type SlideLayout, type TextBox } from "@/lib/slides/types";
+import { CANVAS, type ImageCrop, type SlideKind, type SlideLayout, type TextBox } from "@/lib/slides/types";
 import { ScaledSlide, Slide } from "./slide";
 
 const SNAP = 0.015;
@@ -18,6 +18,7 @@ export function EditableSlide({
   layout,
   text,
   imageUrl,
+  imageCrop,
   showSafeArea,
   onBoxChange,
 }: {
@@ -26,6 +27,7 @@ export function EditableSlide({
   layout: SlideLayout;
   text: string;
   imageUrl: string | null;
+  imageCrop?: ImageCrop | null;
   showSafeArea: boolean;
   onBoxChange: (box: TextBox) => void;
 }) {
@@ -89,6 +91,7 @@ export function EditableSlide({
         layout={layout}
         text={text || " "}
         imageUrl={imageUrl}
+        imageCrop={imageCrop}
         showSafeArea={showSafeArea}
         textBoxProps={{
           onPointerDown: start,
