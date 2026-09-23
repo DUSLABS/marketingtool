@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { ChevronLeft, ChevronRight, Download, Loader2, Pencil, Send, Shuffle, Smartphone, Sparkles, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, ImageIcon, Loader2, Pencil, Send, Shuffle, Smartphone, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -11,12 +11,14 @@ import { ScaledSlide, Slide } from "@/components/slides/slide";
 import { cn } from "@/lib/utils";
 import {
   getPostForEditor,
+  listPickerImages,
   pickOtherImage,
   rewritePostSlide,
   savePostEdits,
   sendPostToTikTok,
   type EditorPost,
   type EditorSlide,
+  type PickerLibrary,
 } from "./posts/actions";
 
 const CARD_WIDTH = 300;
@@ -50,6 +52,7 @@ export function PostEditorDialog({
   const [saving, startSaving] = useTransition();
   const [sending, startSending] = useTransition();
   const scroller = useRef<HTMLDivElement>(null);
+  const [pickerFor, setPickerFor] = useState<number | null>(null);
 
   useEffect(() => {
     if (!postId) return;
@@ -128,8 +131,9 @@ export function PostEditorDialog({
 
   return (
     <Dialog open={open} onOpenChange={close}>
-      <DialogContent showCloseButton={false} className="flex max-h-[94vh] w-[94vw] max-w-none flex-col gap-0 p-0 sm:max-w-none">
-        <div className="flex items-center justify-between border-b border-border px-5 py-3">
+      {/* Fixed height: header and footer stay put, the slides area scrolls between them. */}
+      <DialogContent showCloseButton={false} className="flex h-[92vh] w-[94vw] max-w-none flex-col gap-0 p-0 sm:max-w-none">
+        <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-3">
           <DialogTitle>Preview</DialogTitle>
           <div className="flex items-center gap-2">
             <Button
@@ -149,14 +153,15 @@ export function PostEditorDialog({
         {!loaded ? (
           <div className="flex h-[560px] flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
             <Loader2 className="size-6 animate-spin text-primary" />
-            {generating ? "Writing the content and rendering the slides… (~20–40 s)" : "Loading…"}
+            {generating ? "Writing the content, checking it against the hook, picking images and rendering… (~40–70 s)" : "Loading…"}
           </div>
         ) : (
           <>
-            <div className="relative">
-              <div ref={scroller} className="flex gap-4 overflow-x-auto px-5 py-5">
+            {/* The inner area scrolls, so the caption and the buttons below stay reachable. */}
+            <div className="relative min-h-0 flex-1">
+              <div ref={scroller} className="absolute inset-0 flex gap-4 overflow-auto px-5 py-5">
                 {slides.map((slide, i) => (
-                  <div key={slide.id} className="shrink-0 space-y-2" style={{ width: CARD_WIDTH }}>
+                  <div key={slide.id} className="h-fit shrink-0 space-y-2" style={{ width: CARD_WIDTH }}>
                     <div
                       className={cn(
                         "group relative overflow-hidden rounded-2xl border-2",
@@ -210,7 +215,10 @@ export function PostEditorDialog({
                           <SlideButton label="Rewrite with AI" onClick={() => void rewrite(i)} disabled={busySlide !== null}>
                             <Sparkles />
                           </SlideButton>
-                          <SlideButton label="Use another image" onClick={() => void shuffle(i)} disabled={busySlide !== null}>
+                          <SlideButton label="Choose image" onClick={() => setPickerFor(i)} disabled={busySlide !== null}>
+                            <ImageIcon />
+                          </SlideButton>
+                          <SlideButton label="Random other image" onClick={() => void shuffle(i)} disabled={busySlide !== null}>
                             <Shuffle />
                           </SlideButton>
                         </div>
@@ -233,7 +241,7 @@ export function PostEditorDialog({
               <ScrollButton side="right" onClick={() => scroll(1)} />
             </div>
 
-            <div className="space-y-3 border-t border-border px-5 py-4">
+            <div className="shrink-0 space-y-3 border-t border-border px-5 py-4">
               <label className="text-sm text-muted-foreground" htmlFor="post-caption">
                 Caption
               </label>
@@ -253,7 +261,7 @@ export function PostEditorDialog({
                     ? "Already sent to TikTok. Edits are no longer possible."
                     : dirty
                       ? "Unsaved changes. Saving renders the slides again."
-                      : "Hover a slide to edit its text, rewrite it with AI or swap the image."}
+                      : "Hover a slide to edit its text, rewrite it with AI or change the image."}
                 </span>
                 <a
                   href={dirty ? undefined : `/api/posts/${post.id}/zip`}
@@ -278,6 +286,108 @@ export function PostEditorDialog({
                   </Button>
                 )}
               </div>
+            </div>
+          </>
+        )}
+
+        {pickerFor !== null && slides[pickerFor] && (
+          <ImagePicker
+            currentAssetId={slides[pickerFor].assetId}
+            onClose={() => setPickerFor(null)}
+            onPick={(img) => {
+              updateSlide(pickerFor, { assetId: img.assetId, imageUrl: img.url, imageCrop: img.crop });
+              setPickerFor(null);
+            }}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+let pickerCache: PickerLibrary[] | null = null;
+
+/** Choose a slide image by hand from any library. */
+function ImagePicker({
+  currentAssetId,
+  onClose,
+  onPick,
+}: {
+  currentAssetId: string | null;
+  onClose: () => void;
+  onPick: (img: PickerLibrary["images"][number]) => void;
+}) {
+  const [libraries, setLibraries] = useState<PickerLibrary[] | null>(pickerCache);
+  const [libraryId, setLibraryId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void listPickerImages().then((res) => {
+      if (cancelled) return;
+      if (!res.ok) return void toast.error(res.error);
+      pickerCache = res.data;
+      setLibraries(res.data);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const active =
+    libraries?.find((l) => l.id === libraryId) ??
+    libraries?.find((l) => l.images.some((i) => i.assetId === currentAssetId)) ??
+    libraries?.[0];
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[88vh] w-[min(920px,94vw)] max-w-none gap-4 sm:max-w-none">
+        <DialogTitle>Choose image</DialogTitle>
+        {!libraries ? (
+          <div className="flex h-60 items-center justify-center">
+            <Loader2 className="size-6 animate-spin text-primary" />
+          </div>
+        ) : libraries.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No libraries yet.</p>
+        ) : (
+          <>
+            <div className="flex flex-wrap gap-1.5">
+              {libraries.map((l) => (
+                <button
+                  key={l.id}
+                  onClick={() => setLibraryId(l.id)}
+                  className={cn(
+                    "rounded-full border px-3 py-1 text-sm transition-colors",
+                    l.id === active?.id ? "border-primary/70 bg-primary/10" : "border-border text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {l.name} <span className="text-xs text-muted-foreground">{l.images.length}</span>
+                </button>
+              ))}
+            </div>
+            <div className="grid max-h-[62vh] grid-cols-4 gap-3 overflow-y-auto pr-1 sm:grid-cols-6">
+              {active?.images.map((img) => (
+                <button
+                  key={img.assetId}
+                  onClick={() => onPick(img)}
+                  className={cn(
+                    "relative aspect-[9/16] overflow-hidden rounded-lg border-2 transition-colors",
+                    img.assetId === currentAssetId ? "border-primary" : "border-transparent hover:border-primary/60",
+                  )}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element -- signed Supabase thumbnail */}
+                  <img
+                    src={img.url}
+                    alt=""
+                    loading="lazy"
+                    className="size-full object-cover"
+                    style={
+                      img.crop
+                        ? { transform: `translate(${img.crop.x * 100}%, ${img.crop.y * 100}%) scale(${img.crop.zoom})` }
+                        : undefined
+                    }
+                  />
+                </button>
+              ))}
             </div>
           </>
         )}
@@ -321,7 +431,7 @@ function ScrollButton({ side, onClick }: { side: "left" | "right"; onClick: () =
       onClick={onClick}
       aria-label={side === "left" ? "Scroll left" : "Scroll right"}
       className={cn(
-        "absolute top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur hover:text-primary",
+        "absolute top-1/2 z-10 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur hover:text-primary",
         side === "left" ? "left-2" : "right-2",
       )}
     >

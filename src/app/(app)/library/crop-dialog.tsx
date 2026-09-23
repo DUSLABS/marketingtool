@@ -8,7 +8,7 @@ import { SafeAreaOverlay, ScaledSlide, SlideImage } from "@/components/slides/sl
 import { CANVAS, clampCrop, DEFAULT_CROP, type ImageCrop } from "@/lib/slides/types";
 import { setAssetCrop } from "./actions";
 
-const WIDTH = 320;
+const WIDTH = 280;
 
 /** Frame an image for 9:16 slides: drag to move, slider to zoom. */
 export function CropDialog({
@@ -54,7 +54,7 @@ export function CropDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Adjust framing</DialogTitle>
           <DialogDescription>

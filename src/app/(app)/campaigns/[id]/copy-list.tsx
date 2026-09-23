@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Eye, Plus, Sparkles, X } from "lucide-react";
+import { Eye, Info, Plus, Sparkles, X } from "lucide-react";
+import { hookItemCount } from "@/lib/slides/hooks";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,6 +26,7 @@ const COPY = {
 export function CopyList({
   kind,
   campaignId,
+  slideCount,
   items,
   onItemsChange,
   previewId,
@@ -33,6 +35,8 @@ export function CopyList({
 }: {
   kind: "hook" | "cta";
   campaignId: string;
+  /** Content slides per post; numbered hooks that promise a different count get a hint. */
+  slideCount?: number;
   items: CopyItem[];
   onItemsChange: (items: CopyItem[]) => void;
   previewId: string | null;
@@ -127,6 +131,14 @@ export function CopyList({
               {item.text || <span className="italic">Image only</span>}
             </button>
             {item.style && <span className="shrink-0 pl-1 text-[10px] tracking-wider text-muted-foreground uppercase">{item.style}</span>}
+            {kind === "hook" && slideCount && hookItemCount(item.text) && hookItemCount(item.text) !== slideCount && (
+              <span
+                className="flex shrink-0 items-center gap-0.5 pl-1 text-[11px] text-[var(--warning)]"
+                title={`This hook promises ${hookItemCount(item.text)} items, so its posts get ${hookItemCount(item.text)} content slides instead of ${slideCount}.`}
+              >
+                <Info className="size-3" /> {hookItemCount(item.text)} slides
+              </span>
+            )}
             <button
               onClick={() => onPreview(item.id)}
               className="shrink-0 rounded-md p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground"

@@ -54,6 +54,7 @@ import { generateAndSendPost, generatePost } from "./posts/actions";
 import { CopyList } from "./copy-list";
 import { PublishSettings, type PublishAccount } from "./publish-settings";
 import { PostEditorDialog } from "./post-editor";
+import { hookItemCount } from "@/lib/slides/hooks";
 
 export type EditorCampaign = {
   id: string;
@@ -68,6 +69,9 @@ export type EditorCampaign = {
   tone: "plain" | "punchy" | "expert" | "warm";
   web_research: boolean;
   cta_enabled: boolean;
+  product_mention: "cta" | "last_slide";
+  style_examples: string;
+  image_matching: boolean;
   layout: CampaignLayout;
   tiktok_account_id: string | null;
   publish_mode: "draft" | "direct";
@@ -189,7 +193,9 @@ export function CampaignEditor({
   const enabledHooks = hooks.filter((h) => h.enabled);
   const hookText = hooks.find((h) => h.id === previewHookId)?.text ?? enabledHooks[0]?.text ?? "";
   const ctaText = ctas.find((c) => c.id === previewCtaId)?.text ?? ctas.find((c) => c.enabled)?.text ?? "";
-  const contentTexts = Array.from({ length: campaign.content_slide_count }, (_, i) => {
+  // A numbered hook sets how many content slides its posts get ("6 ways…" → 6).
+  const contentCount = previewSlides?.length ?? hookItemCount(hookText) ?? campaign.content_slide_count;
+  const contentTexts = Array.from({ length: contentCount }, (_, i) => {
     if (previewSlides?.[i]) return { text: previewSlides[i], placeholder: false };
     const prefix = { numbered: `${i + 1}. `, steps: `Step ${i + 1}: `, plain: "" }[campaign.content_format];
     return { text: `${prefix}Your ${ORDINALS[i]} point, plus the one detail that makes it land`, placeholder: true };
@@ -402,6 +408,7 @@ export function CampaignEditor({
               <CopyList
                 kind="hook"
                 campaignId={campaign.id}
+                slideCount={campaign.content_slide_count}
                 items={hooks}
                 onItemsChange={setHooks}
                 previewId={previewHookId}
@@ -911,6 +918,22 @@ function ContentSettings({
 }) {
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <Label className="text-muted-foreground">Language</Label>
+          <Segmented
+            size="sm"
+            value={campaign.language}
+            onChange={(language) => patch({ language })}
+            options={[
+              { value: "en", label: "English" },
+              { value: "de", label: "Deutsch" },
+            ]}
+          />
+        </div>
+        <p className="text-xs text-muted-foreground">Hooks, slides, CTAs and captions are written in this language.</p>
+      </div>
+
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <Label htmlFor="content_prompt" className="text-muted-foreground">
@@ -1004,6 +1027,53 @@ function ContentSettings({
             ]}
           />
         </div>
+      </div>
+
+      <div className="space-y-2 border-t border-border pt-5">
+        <Label className="text-muted-foreground">Product in the content</Label>
+        <Segmented
+          value={campaign.product_mention}
+          onChange={(product_mention) => patch({ product_mention })}
+          options={[
+            { value: "cta", label: "Only on the CTA slide" },
+            { value: "last_slide", label: "Last content slide" },
+          ]}
+        />
+        <p className="text-xs text-muted-foreground">
+          {campaign.product_mention === "last_slide"
+            ? "The last item of the list is where the product is the natural answer, e.g. number 5 of 5."
+            : "Content slides stay pure value; the product appears on the CTA slide. Usually feels less like an ad."}
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label className="text-muted-foreground">Image choice</Label>
+        <Segmented
+          value={campaign.image_matching ? "match" : "rotate"}
+          onChange={(v) => patch({ image_matching: v === "match" })}
+          options={[
+            { value: "match", label: "Match to the text (AI)" },
+            { value: "rotate", label: "Rotate" },
+          ]}
+        />
+        <p className="text-xs text-muted-foreground">
+          {campaign.image_matching
+            ? "For every generated post the AI picks the photo that best fits each slide, from the images not used recently. Images need to be analysed once in the Library."
+            : "Images rotate through each library: least recently used first, favorites more often."}
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="style_examples" className="text-muted-foreground">
+          Examples you like <span className="font-normal">(optional)</span>
+        </Label>
+        <Textarea
+          id="style_examples"
+          rows={4}
+          value={campaign.style_examples}
+          onChange={(e) => patch({ style_examples: e.target.value })}
+          placeholder={"Paste 1–3 slideshows whose texts you like, one slide per line. The AI matches their tone and level of detail without copying them.\n\ne.g.\n6 wedding photos nobody takes (but should)\n1. Your dad reading your text on the morning of\n2. …"}
+        />
       </div>
 
       <Button variant="outline" className="text-primary" onClick={onGenerate} disabled={aiBusy}>

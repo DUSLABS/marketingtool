@@ -208,7 +208,7 @@ export async function rewritePostSlide(
   const { data: post } = await supabase
     .from("posts")
     .select(
-      "campaign:campaigns(language, content_prompt, content_slide_count, content_format, content_length, tone, product:products(name, description, facts, voice, avoid))",
+      "campaign:campaigns(language, content_prompt, content_slide_count, content_format, content_length, tone, product_mention, style_examples, product:products(name, description, facts, voice, avoid))",
     )
     .eq("id", postId)
     .single();
@@ -220,6 +220,8 @@ export async function rewritePostSlide(
         content_format: CampaignContext["contentFormat"];
         content_length: CampaignContext["contentLength"];
         tone: CampaignContext["tone"];
+        product_mention: "cta" | "last_slide";
+        style_examples: string;
         product: ProductContext | null;
       }
     | undefined;
@@ -234,6 +236,8 @@ export async function rewritePostSlide(
         contentFormat: c.content_format,
         contentLength: c.content_length,
         tone: c.tone,
+        productMention: c.product_mention,
+        styleExamples: c.style_examples,
       },
       slides,
       index,
@@ -301,4 +305,34 @@ export async function savePostEdits(
   }
   revalidatePath("/campaigns", "layout");
   return { ok: true, data: undefined };
+}
+
+export type PickerLibrary = { id: string; name: string; images: { assetId: string; url: string; crop: ImageCrop | null }[] };
+
+/** All libraries with their (unlocked) images, for choosing a slide image by hand. */
+export async function listPickerImages(): Promise<ActionResult<PickerLibrary[]>> {
+  const { supabase } = await getWorkspace();
+  const { data, error } = await supabase
+    .from("libraries")
+    .select("id, name, library_assets(asset:assets(id, thumb_path, crop, locked))")
+    .order("created_at");
+  if (error) return { ok: false, error: error.message };
+
+  type Row = { asset: { id: string; thumb_path: string | null; crop: ImageCrop | null; locked: boolean } | null };
+  const rows = data.map((lib) => ({
+    id: lib.id as string,
+    name: lib.name as string,
+    assets: (lib.library_assets as unknown as Row[]).map((r) => r.asset).filter((a) => a && !a.locked && a.thumb_path),
+  }));
+  const urls = await signPaths(supabase, "assets", rows.flatMap((l) => l.assets.map((a) => a!.thumb_path)));
+  return {
+    ok: true,
+    data: rows.map((l) => ({
+      id: l.id,
+      name: l.name,
+      images: l.assets
+        .filter((a) => urls.has(a!.thumb_path!))
+        .map((a) => ({ assetId: a!.id, url: urls.get(a!.thumb_path!)!, crop: a!.crop })),
+    })),
+  };
 }

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition, type DragEvent } from "react";
-import { Check, Crop, FolderPlus, ImagePlus, Lock, MoreHorizontal, Star, Trash2, Upload, X } from "lucide-react";
+import { Check, Crop, FolderPlus, ImagePlus, Lock, MoreHorizontal, Sparkles, Star, Trash2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,6 +22,7 @@ import { CropDialog } from "./crop-dialog";
 import {
   createLibrary,
   deleteAssets,
+  describeMissingImages,
   deleteLibrary,
   findExistingAssets,
   linkAssets,
@@ -41,6 +42,7 @@ export type LibraryAsset = {
   favorite: boolean;
   locked: boolean;
   crop: ImageCrop | null;
+  description: string | null;
 };
 
 type Props = {
@@ -49,16 +51,18 @@ type Props = {
   selected: LibrarySummary | null;
   assets: LibraryAsset[];
   totalCount: number;
+  undescribedCount: number;
 };
 
 const BATCH_SIZE = 4;
 
-export function LibraryView({ workspaceId, libraries, selected, assets, totalCount }: Props) {
+export function LibraryView({ workspaceId, libraries, selected, assets, totalCount, undescribedCount }: Props) {
   const router = useRouter();
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [upload, setUpload] = useState<{ done: number; total: number } | null>(null);
   const [dragging, setDragging] = useState(false);
   const [cropping, setCropping] = useState<LibraryAsset | null>(null);
+  const [describing, startDescribing] = useTransition();
   const [, startTransition] = useTransition();
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -186,6 +190,23 @@ export function LibraryView({ workspaceId, libraries, selected, assets, totalCou
             }}
           />
           <div className="flex items-center gap-2">
+            {undescribedCount > 0 && !upload && (
+              <Button
+                variant="outline"
+                disabled={describing}
+                title="The AI looks at each image once, so campaigns can pick photos that fit the slide text"
+                onClick={() =>
+                  startDescribing(async () => {
+                    const n = await describeMissingImages();
+                    toast.success(`${n} image${n === 1 ? "" : "s"} analysed`);
+                    router.refresh();
+                  })
+                }
+              >
+                <Sparkles className={cn(describing && "animate-pulse")} />
+                {describing ? "Analysing…" : `Analyse ${undescribedCount} image${undescribedCount === 1 ? "" : "s"} for AI matching`}
+              </Button>
+            )}
             {upload && (
               <span className="text-sm text-muted-foreground tabular-nums">
                 Uploading {upload.done}/{upload.total}…
@@ -423,6 +444,7 @@ function AssetTile({
   const crop = asset.crop ?? { zoom: 1, x: 0, y: 0 };
   return (
     <div
+      title={asset.description ?? undefined}
       className={cn(
         "group relative aspect-[9/16] overflow-hidden rounded-xl border border-border bg-secondary",
         selected && "glow",

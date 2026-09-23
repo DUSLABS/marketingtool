@@ -47,6 +47,9 @@ export type CampaignPatch = Partial<{
   tone: CampaignContext["tone"];
   web_research: boolean;
   cta_enabled: boolean;
+  product_mention: "cta" | "last_slide";
+  style_examples: string;
+  image_matching: boolean;
   layout: CampaignLayout;
   tiktok_account_id: string | null;
   publish_mode: "draft" | "direct";
@@ -69,6 +72,9 @@ const PATCHABLE = new Set<keyof CampaignPatch>([
   "tone",
   "web_research",
   "cta_enabled",
+  "product_mention",
+  "style_examples",
+  "image_matching",
   "layout",
   "tiktok_account_id",
   "publish_mode",
@@ -144,7 +150,7 @@ async function loadContext(campaignId: string) {
   const { data: c, error } = await supabase
     .from("campaigns")
     .select(
-      "language, content_prompt, content_slide_count, content_format, content_length, tone, web_research, product:products(name, description, facts, voice, avoid)",
+      "language, content_prompt, content_slide_count, content_format, content_length, tone, web_research, product_mention, style_examples, product:products(name, description, facts, voice, avoid)",
     )
     .eq("id", campaignId)
     .single();
@@ -157,6 +163,8 @@ async function loadContext(campaignId: string) {
     contentFormat: c.content_format,
     contentLength: c.content_length,
     tone: c.tone,
+    productMention: c.product_mention,
+    styleExamples: c.style_examples,
   };
   return { supabase, campaign, product: (c.product as unknown as ProductContext | null) ?? null, webResearch: c.web_research as boolean };
 }

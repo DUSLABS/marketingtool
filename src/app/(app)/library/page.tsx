@@ -14,17 +14,19 @@ type AssetRow = {
   favorite: boolean;
   locked: boolean;
   crop: ImageCrop | null;
+  description: string | null;
 };
 
-const ASSET_COLUMNS = "id, thumb_path, width, height, favorite, locked, crop";
+const ASSET_COLUMNS = "id, thumb_path, width, height, favorite, locked, crop, description";
 
 export default async function LibraryPage({ searchParams }: PageProps<"/library">) {
   const { l } = await searchParams;
   const { supabase, workspaceId } = await getWorkspace();
 
-  const [{ data: libraryRows, error: libError }, { count: totalCount }] = await Promise.all([
+  const [{ data: libraryRows, error: libError }, { count: totalCount }, { count: undescribed }] = await Promise.all([
     supabase.from("libraries").select("id, name, library_assets(count)").order("created_at"),
     supabase.from("assets").select("id", { count: "exact", head: true }),
+    supabase.from("assets").select("id", { count: "exact", head: true }).is("description", null),
   ]);
   if (libError) throw libError;
 
@@ -62,6 +64,7 @@ export default async function LibraryPage({ searchParams }: PageProps<"/library"
     favorite: r.favorite,
     locked: r.locked,
     crop: r.crop,
+    description: r.description,
   }));
 
   return (
@@ -76,6 +79,7 @@ export default async function LibraryPage({ searchParams }: PageProps<"/library"
         selected={selected}
         assets={assets}
         totalCount={totalCount ?? 0}
+        undescribedCount={undescribed ?? 0}
       />
     </>
   );

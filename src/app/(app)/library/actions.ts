@@ -1,6 +1,9 @@
 "use server";
 
+import { after } from "next/server";
 import { revalidatePath } from "next/cache";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { describeAssets } from "@/lib/engine/describe-assets";
 import { getWorkspace } from "@/lib/workspace";
 import { clampCrop, type ImageCrop } from "@/lib/slides/types";
 
@@ -76,7 +79,24 @@ export async function registerAssets(assets: NewAsset[], existingIds: string[], 
   if (libraryId) {
     await linkAssets([...assets.map((a) => a.id), ...existingIds], libraryId);
   }
+
+  // Describe new images for AI matching after the response is sent.
+  if (assets.length > 0) {
+    after(() =>
+      describeAssets(createAdminClient(), { workspaceId, ids: assets.map((a) => a.id) }).catch((e) =>
+        console.error("Describing uploads failed", e),
+      ),
+    );
+  }
   revalidatePath("/library");
+}
+
+/** Describes up to 40 images that have no AI description yet (for images uploaded before matching existed). */
+export async function describeMissingImages() {
+  const { workspaceId } = await getWorkspace();
+  const described = await describeAssets(createAdminClient(), { workspaceId, limit: 40 });
+  revalidatePath("/library");
+  return described;
 }
 
 export async function linkAssets(assetIds: string[], libraryId: string) {

@@ -1,7 +1,7 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { generateContentSlides, researchTopic, type CampaignContext, type ProductContext } from "@/lib/ai/generate";
+import { generateContentSlides, matchImages, researchTopic, type CampaignContext, type ProductContext } from "@/lib/ai/generate";
 import { ctaPosition, withDefaults, type CampaignLayout, type SlideKind, type SlideLayout } from "@/lib/slides/types";
 
 // Builds one post from a campaign's rules: rotate hook/CTA, write fresh content, pick images.
@@ -9,10 +9,12 @@ import { ctaPosition, withDefaults, type CampaignLayout, type SlideKind, type Sl
 
 export class CampaignNotReadyError extends Error {}
 
-type Candidate = { id: string; favorite: boolean };
+type Candidate = { id: string; favorite: boolean; description: string | null };
 type PlannedSlide = { kind: SlideKind; text: string; layout: Omit<SlideLayout, "libraryId">; libraryId: string };
 
 const HISTORY_POSTS = 200;
+/** How many of the least recently used images per library the AI may choose from (keeps variety). */
+const MATCH_POOL = 12;
 
 function pickLeastUsed<T extends { id: string }>(items: T[], usage: Map<string, number>): T {
   const min = Math.min(...items.map((i) => usage.get(i.id) ?? 0));
@@ -94,6 +96,8 @@ export async function buildPost(
     contentFormat: c.content_format,
     contentLength: c.content_length,
     tone: c.tone,
+    productMention: c.product_mention ?? "cta",
+    styleExamples: c.style_examples ?? "",
   };
   const product = (c.product as ProductContext | null) ?? null;
   const research = c.web_research
@@ -117,7 +121,7 @@ export async function buildPost(
   const libraryIds = [...new Set(planned.map((s) => s.libraryId))];
   const { data: libraryAssets, error: laError } = await db
     .from("library_assets")
-    .select("library_id, asset:assets!inner(id, favorite, locked, workspace_id)")
+    .select("library_id, asset:assets!inner(id, favorite, description, locked, workspace_id)")
     .in("library_id", libraryIds)
     .eq("asset.workspace_id", workspaceId)
     .eq("asset.locked", false);
@@ -129,15 +133,44 @@ export async function buildPost(
     candidatesByLibrary.set(row.library_id, [...(candidatesByLibrary.get(row.library_id) ?? []), a]);
   }
 
-  const taken = new Set<string>();
-  const assetIds: string[] = [];
   for (const s of planned) {
-    const candidates = candidatesByLibrary.get(s.libraryId);
-    if (!candidates?.length) throw new CampaignNotReadyError(`The ${s.kind} library has no usable (unlocked) images.`);
-    const id = pickImage(candidates, assetLastUsed, taken, assetIds.at(-1) ?? null);
+    if (!candidatesByLibrary.get(s.libraryId)?.length) {
+      throw new CampaignNotReadyError(`The ${s.kind} library has no usable (unlocked) images.`);
+    }
+  }
+
+  // AI matching: the least recently used, described images of each library are offered per
+  // slide and the AI picks the best fit. Slides it can't match fall back to rotation.
+  let matched: (string | null)[] = planned.map(() => null);
+  if (c.image_matching !== false) {
+    const pools = planned.map((s) =>
+      [...candidatesByLibrary.get(s.libraryId)!]
+        .filter((a) => a.description)
+        .sort((a, b) => (assetLastUsed.get(a.id) ?? 0) - (assetLastUsed.get(b.id) ?? 0))
+        .slice(0, MATCH_POOL),
+    );
+    if (pools.every((p) => p.length > 0)) {
+      try {
+        matched = await matchImages(
+          planned.map((s, i) => ({
+            kind: s.kind,
+            text: s.text,
+            candidates: pools[i].map((a) => ({ id: a.id, description: a.description!, favorite: a.favorite })),
+          })),
+        );
+      } catch (e) {
+        console.error("Image matching failed, falling back to rotation", e);
+      }
+    }
+  }
+
+  const taken = new Set<string>(matched.filter((id): id is string => !!id));
+  const assetIds: string[] = [];
+  planned.forEach((s, i) => {
+    const id = matched[i] ?? pickImage(candidatesByLibrary.get(s.libraryId)!, assetLastUsed, taken, assetIds.at(-1) ?? null);
     taken.add(id);
     assetIds.push(id);
-  }
+  });
 
   // ─── Persist ─────────────────────────────────────────────────────────────
   const combinationHash = createHash("sha256")
