@@ -1,7 +1,7 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { generateContentSlides, matchImages, researchTopic, type CampaignContext, type ProductContext } from "@/lib/ai/generate";
+import { generateContentSlides, matchImages, pickCta, researchTopic, type CampaignContext, type ProductContext } from "@/lib/ai/generate";
 import { ctaPosition, withDefaults, type CampaignLayout, type SlideKind, type SlideLayout } from "@/lib/slides/types";
 
 // Builds one post from a campaign's rules: rotate hook/CTA, write fresh content, pick images.
@@ -86,7 +86,6 @@ export async function buildPost(
   }
 
   const hook = pickLeastUsed(hooks, hookUsage);
-  const cta = c.cta_enabled && ctas?.length ? pickLeastUsed(ctas, ctaUsage) : null;
 
   // ─── Content ─────────────────────────────────────────────────────────────
   const campaign: CampaignContext = {
@@ -104,6 +103,27 @@ export async function buildPost(
     ? await researchTopic({ topic: c.content_prompt, hook: hook.text, language: c.language })
     : undefined;
   const { slides: contentTexts, caption } = await generateContentSlides({ product, campaign, hook: hook.text, research });
+
+  // The CTA is chosen after the content so it follows the finished post; on error or with a
+  // single CTA we fall back to the least used one.
+  let cta: { id: string; text: string } | null = null;
+  if (c.cta_enabled && ctas?.length) {
+    cta = pickLeastUsed(ctas, ctaUsage);
+    if (ctas.length > 1) {
+      try {
+        const index = await pickCta({
+          product,
+          campaign,
+          hook: hook.text,
+          slides: contentTexts,
+          ctas: ctas.map((x) => ({ text: x.text, uses: ctaUsage.get(x.id) ?? 0 })),
+        });
+        if (index !== null) cta = ctas[index];
+      } catch (e) {
+        console.error("CTA matching failed, using rotation", e);
+      }
+    }
+  }
 
   const snapshot = (kind: SlideKind) => {
     const { libraryId, ...rest } = layout[kind];

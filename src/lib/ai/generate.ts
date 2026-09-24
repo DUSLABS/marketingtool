@@ -202,17 +202,52 @@ type ContentInput = {
  * review checks every slide against the hook's promise, and failing posts are rewritten once
  * with that feedback. Numbered hooks set the slide count ("6 ways…" → 6 slides).
  */
+const MAX_REWRITES = 2;
+
 export async function generateContentSlides(input: ContentInput) {
   const campaign = { ...input.campaign, contentSlideCount: hookItemCount(input.hook) ?? input.campaign.contentSlideCount };
-  const draft = await writeContent({ ...input, campaign });
   const productOnLastSlide = campaign.productMention === "last_slide" && input.product ? input.product.name : null;
-  const problems = await reviewAgainstHook(input.hook, draft.slides, input.campaign.language, productOnLastSlide).catch((e) => {
-    console.error("Hook review failed, keeping the draft", e);
-    return [];
-  });
-  if (problems.length === 0) return draft;
-  console.info("Hook review rejected slides, rewriting once", { hook: input.hook, problems });
-  return writeContent({ ...input, campaign }, { previous: draft.slides, problems });
+
+  let draft = await writeContent({ ...input, campaign });
+  for (let round = 0; round < MAX_REWRITES; round++) {
+    const problems = await reviewAgainstHook(input.hook, draft.slides, campaign.language, productOnLastSlide).catch((e) => {
+      console.error("Hook review failed, keeping the draft", e);
+      return [];
+    });
+    if (problems.length === 0) return draft;
+    console.info("Hook review rejected slides, rewriting", { hook: input.hook, round: round + 1, problems });
+    draft = await writeContent({ ...input, campaign }, { previous: draft.slides, problems });
+  }
+  return draft;
+}
+
+/** Picks the CTA from the campaign's list that fits the finished post best. */
+export async function pickCta(input: {
+  product: ProductContext | null;
+  campaign: CampaignContext;
+  hook: string;
+  slides: string[];
+  ctas: { text: string; uses: number }[];
+}) {
+  const { choice } = await parse(
+    z.object({ choice: z.number() }),
+    `${productBlock(input.product)}
+
+${campaignBlock(input.campaign)}
+
+<post>
+Hook: ${input.hook}
+${input.slides.map((t, i) => `Slide ${i + 1}: ${t}`).join("\n")}
+</post>
+
+<ctas>
+${input.ctas.map((c, i) => `${i + 1}. ${c.text || "(image only)"} — used in ${c.uses} previous posts`).join("\n")}
+</ctas>
+
+Pick the call to action that follows this post most naturally: it should sound like the next sentence after the last slide, not a jump to a different topic, and must not repeat what the last slide already says. Where two fit equally well, choose the one used less often. Answer with its number.`,
+    { maxTokens: 1000 },
+  );
+  return Number.isInteger(choice) && choice >= 1 && choice <= input.ctas.length ? choice - 1 : null;
 }
 
 async function writeContent(
