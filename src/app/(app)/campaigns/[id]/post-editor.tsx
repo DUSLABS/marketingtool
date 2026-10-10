@@ -11,6 +11,8 @@ import { ScaledSlide, Slide } from "@/components/slides/slide";
 import { cn } from "@/lib/utils";
 import {
   getPostForEditor,
+  continuePostGeneration,
+  rerenderPost,
   listPickerImages,
   pickOtherImage,
   rewritePostSlide,
@@ -53,25 +55,44 @@ export function PostEditorDialog({
   const [sending, startSending] = useTransition();
   const scroller = useRef<HTMLDivElement>(null);
   const [pickerFor, setPickerFor] = useState<number | null>(null);
+  const [generationError, setGenerationError] = useState<string | null>(null);
+  const [retryGeneration, setRetryGeneration] = useState(0);
 
   useEffect(() => {
     if (!postId) return;
     let cancelled = false;
-    void getPostForEditor(postId).then((res) => {
-      if (cancelled) return;
-      if (!res.ok) return void toast.error(res.error);
-      setPost(res.data);
-      setSlides(res.data.slides);
-      setCaption(res.data.caption);
-      setDirty(false);
-      setEditing(null);
-    });
+    let timer: ReturnType<typeof setTimeout>;
+    async function load() {
+      try {
+        const res = await getPostForEditor(postId!);
+        if (cancelled) return;
+        if (!res.ok) { setGenerationError(res.error); return; }
+        setGenerationError(null);
+        setPost(res.data);
+        setSlides(res.data.slides);
+        setCaption(res.data.caption);
+        setDirty(false);
+        setEditing(null);
+        if (res.data.status === "generating") {
+          const advanced = await continuePostGeneration(postId!);
+          if (cancelled) return;
+          if (!advanced.ok) { setGenerationError(advanced.error); return; }
+          timer = setTimeout(() => void load(), 1500);
+        }
+      } catch {
+        if (!cancelled) setGenerationError("Could not continue generation. Your progress is saved; retry to continue.");
+      }
+    }
+    void load();
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
-  }, [postId]);
+  }, [postId, retryGeneration]);
 
-  const loaded = post && post.id === postId;
+  const processing = post?.id === postId && post?.status === "generating";
+  const incomplete = post?.id === postId && post?.slides.some((s) => !s.assetId);
+  const loaded = post && post.id === postId && !processing && !incomplete && !generationError;
   const locked = !!post?.sentToTikTok && post.status !== "failed";
 
   function updateSlide(index: number, p: Partial<EditorSlide>) {
@@ -89,6 +110,14 @@ export function PostEditorDialog({
 
   async function shuffle(index: number) {
     setBusySlide(index);
+    if (post!.automaticImages) {
+      try {
+        await save(slides.map((s, i) => i === index ? { ...s, regenerateImage: true } : s));
+      } finally {
+        setBusySlide(null);
+      }
+      return;
+    }
     const used = slides.map((s) => s.assetId).filter((id): id is string => !!id);
     const res = await pickOtherImage(post!.id, slides[index].kind, used);
     setBusySlide(null);
@@ -96,10 +125,10 @@ export function PostEditorDialog({
     updateSlide(index, { assetId: res.data.assetId, imageUrl: res.data.imageUrl, imageCrop: res.data.imageCrop });
   }
 
-  async function save() {
+  async function save(updatedSlides = slides) {
     const res = await savePostEdits(post!.id, {
       caption,
-      slides: slides.map((s) => ({ id: s.id, text: s.text, layout: s.layout, assetId: s.assetId })),
+      slides: updatedSlides.map((s) => ({ id: s.id, text: s.text, layout: s.layout, assetId: s.assetId, regenerateImage: s.regenerateImage })),
     });
     if (!res.ok) {
       toast.error(res.error);
@@ -107,6 +136,7 @@ export function PostEditorDialog({
     }
     setDirty(false);
     setEditing(null);
+    setRetryGeneration((n) => n + 1);
     onChanged?.();
     return true;
   }
@@ -114,6 +144,13 @@ export function PostEditorDialog({
   function send() {
     startSending(async () => {
       if (dirty && !(await save())) return;
+      if (dirty && post!.automaticImages) {
+        const refreshed = await getPostForEditor(post!.id);
+        if (refreshed.ok && refreshed.data.status === "generating") {
+          toast("Updating the images to match your text. Send the post when they are ready.");
+          return;
+        }
+      }
       const res = await sendPostToTikTok(post!.id);
       if (!res.ok) return void toast.error(res.error, { duration: 10_000 });
       toast.success(res.data === "SEND_TO_USER_INBOX" ? "Sent to your TikTok inbox" : "Sent to TikTok");
@@ -152,8 +189,25 @@ export function PostEditorDialog({
 
         {!loaded ? (
           <div className="flex h-[560px] flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
-            <Loader2 className="size-6 animate-spin text-primary" />
-            {generating ? "Writing the content, checking it against the hook, picking images and rendering… (~40–70 s)" : "Loading…"}
+            {generationError || post?.status === "failed" ? (
+              <>
+                <p className="max-w-xl px-5 text-center text-destructive">{generationError || post?.error}</p>
+                {postId && <Button variant="outline" onClick={async () => {
+                  const result = await rerenderPost(postId);
+                  if (!result.ok) return void setGenerationError(result.error);
+                  setGenerationError(null);
+                  setRetryGeneration((n) => n + 1);
+                }}>Retry · keep completed images</Button>}
+              </>
+            ) : (
+              <>
+                <Loader2 className="size-6 animate-spin text-primary" />
+                <p>{processing
+                  ? `Matching and creating images · ${slides.filter((s) => s.assetId).length} of ${slides.length} ready`
+                  : generating ? "Writing the content and planning matching images…" : "Loading…"}</p>
+                {processing && <p className="text-xs">Progress is saved. You can close this preview; background processing continues.</p>}
+              </>
+            )}
           </div>
         ) : (
           <>
@@ -218,7 +272,7 @@ export function PostEditorDialog({
                           <SlideButton label="Choose image" onClick={() => setPickerFor(i)} disabled={busySlide !== null}>
                             <ImageIcon />
                           </SlideButton>
-                          <SlideButton label="Random other image" onClick={() => void shuffle(i)} disabled={busySlide !== null}>
+                          <SlideButton label={post.automaticImages ? "Find or create a fresh matching image" : "Random other image"} onClick={() => void shuffle(i)} disabled={busySlide !== null}>
                             <Shuffle />
                           </SlideButton>
                         </div>

@@ -24,6 +24,7 @@ export type PostSummary = {
 };
 
 const STATUS_LABEL: Record<string, string> = {
+  generating: "Creating matching images",
   preview: "Ready",
   queued: "Scheduled",
   rendering: "Rendering",
@@ -74,7 +75,7 @@ export function PostsView({ campaign, posts }: { campaign: { id: string; name: s
         </div>
         <Button onClick={generate} disabled={generating} className={cn("ml-auto", generating ? "glow" : "glow-hover")}>
           <Sparkles className={cn(generating && "animate-pulse")} />
-          {generating ? "Writing & rendering… (~30–60 s)" : "Generate post"}
+          {generating ? "Planning your post…" : "Generate post"}
         </Button>
       </div>
 
@@ -166,7 +167,7 @@ function PostCard({ post, canSend, onOpen }: { post: PostSummary; canSend: boole
                 })
               }
             >
-              <RefreshCw className={cn(busy && "animate-spin")} /> Render again
+              <RefreshCw className={cn(busy && "animate-spin")} /> {post.status === "generating" || !rendered ? "Continue creation" : "Render again"}
             </Button>
           )}
           {rendered && (

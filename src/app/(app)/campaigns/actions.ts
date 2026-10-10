@@ -18,6 +18,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getAccessToken } from "@/lib/tiktok/accounts";
 import { queryCreatorInfo } from "@/lib/tiktok/api";
 import { publishErrorMessage } from "@/lib/engine/publish-post";
+import { imageSettingsSchema, type ImageSettings } from "@/lib/slides/image-policy";
 
 // ─── Campaign CRUD ───────────────────────────────────────────────────────────
 
@@ -36,7 +37,7 @@ export async function createCampaign(formData: FormData) {
   redirect(`/campaigns/${data.id}`);
 }
 
-export type CampaignPatch = Partial<{
+export type CampaignPatch = Partial<ImageSettings & {
   name: string;
   product_id: string | null;
   language: string;
@@ -75,6 +76,10 @@ const PATCHABLE = new Set<keyof CampaignPatch>([
   "product_mention",
   "style_examples",
   "image_matching",
+  "image_mode",
+  "image_style",
+  "image_max_uses",
+  "image_cooldown_days",
   "layout",
   "tiktok_account_id",
   "publish_mode",
@@ -89,6 +94,7 @@ const PATCHABLE = new Set<keyof CampaignPatch>([
 export async function updateCampaign(id: string, patch: CampaignPatch) {
   const { supabase } = await getWorkspace();
   const clean = Object.fromEntries(Object.entries(patch).filter(([k]) => PATCHABLE.has(k as keyof CampaignPatch)));
+  imageSettingsSchema.partial().parse(clean);
   if (Object.keys(clean).length === 0) return;
   const { error } = await supabase
     .from("campaigns")
@@ -272,7 +278,7 @@ export async function setCampaignStatus(campaignId: string, status: "active" | "
     const [{ data: c }, { count: hooks }, { count: slots }] = await Promise.all([
       supabase
         .from("campaigns")
-        .select("layout, cta_enabled, content_prompt, publish_mode, privacy_level, account:tiktok_accounts(status)")
+        .select("layout, cta_enabled, content_prompt, image_mode, publish_mode, privacy_level, account:tiktok_accounts(status)")
         .eq("id", campaignId)
         .single(),
       supabase.from("campaign_hooks").select("id", { count: "exact", head: true }).eq("campaign_id", campaignId).eq("enabled", true),
@@ -288,9 +294,10 @@ export async function setCampaignStatus(campaignId: string, status: "active" | "
       !slots && "add at least one posting time",
       !hooks && "add at least one active hook",
       !c.content_prompt.trim() && "describe what the posts are about",
-      !layout.hook.libraryId && "choose a hook image library",
-      !layout.content.libraryId && "choose a content image library",
-      c.cta_enabled && !layout.cta.libraryId && "choose a CTA image library",
+      c.image_mode === "auto" && !process.env.OPENAI_API_KEY?.trim() && "configure OPENAI_API_KEY on the server",
+      c.image_mode !== "auto" && !layout.hook.libraryId && "choose a hook image library",
+      c.image_mode !== "auto" && !layout.content.libraryId && "choose a content image library",
+      c.image_mode !== "auto" && c.cta_enabled && !layout.cta.libraryId && "choose a CTA image library",
     ].filter(Boolean);
     if (problems.length) return { ok: false, error: `Before starting: ${problems.join(", ")}.` };
   }

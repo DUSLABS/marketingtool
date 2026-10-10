@@ -4,6 +4,7 @@ import { signPaths } from "@/lib/storage";
 import { withDefaults, type CampaignLayout, type ImageCrop } from "@/lib/slides/types";
 import type { CopyItem } from "../actions";
 import { CampaignEditor, type EditorCampaign, type EditorLibrary } from "./campaign-editor";
+import { DEFAULT_IMAGE_SETTINGS } from "@/lib/slides/image-policy";
 
 const SAMPLES_PER_LIBRARY = 24;
 // Generating a post (AI + rendering) can run from this page too.
@@ -63,6 +64,10 @@ export default async function CampaignPage({ params }: PageProps<"/campaigns/[id
     product_mention: campaign.product_mention ?? "cta",
     style_examples: campaign.style_examples ?? "",
     image_matching: campaign.image_matching ?? true,
+    image_mode: campaign.image_mode ?? "library",
+    image_style: campaign.image_style ?? DEFAULT_IMAGE_SETTINGS.image_style,
+    image_max_uses: campaign.image_max_uses ?? DEFAULT_IMAGE_SETTINGS.image_max_uses,
+    image_cooldown_days: campaign.image_cooldown_days ?? DEFAULT_IMAGE_SETTINGS.image_cooldown_days,
     layout: withDefaults(campaign.layout as Partial<CampaignLayout>),
     tiktok_account_id: campaign.tiktok_account_id,
     publish_mode: campaign.publish_mode,

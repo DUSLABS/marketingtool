@@ -34,7 +34,8 @@ export async function describeAssets(db: SupabaseClient, { workspaceId, ids, lim
         if (!url) continue;
         try {
           const description = await describeImage(url);
-          await db.from("assets").update({ description }).eq("id", a.id);
+          const { error: updateError } = await db.from("assets").update({ description }).eq("id", a.id).eq("workspace_id", workspaceId);
+          if (updateError) throw updateError;
           described++;
         } catch (e) {
           console.error(`Describing asset ${a.id} failed`, e);

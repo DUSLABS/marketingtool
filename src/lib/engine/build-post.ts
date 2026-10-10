@@ -1,7 +1,9 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { generateContentSlides, matchImages, pickCta, researchTopic, type CampaignContext, type ProductContext } from "@/lib/ai/generate";
+import { generateContentSlides, matchImages, pickCta, planSlideImages, researchTopic, type CampaignContext, type ProductContext } from "@/lib/ai/generate";
+import { requireImageGenerationKey } from "@/lib/ai/images";
+import { DEFAULT_IMAGE_SETTINGS, imageSettingsSchema } from "@/lib/slides/image-policy";
 import { ctaPosition, withDefaults, type CampaignLayout, type SlideKind, type SlideLayout } from "@/lib/slides/types";
 
 // Builds one post from a campaign's rules: rotate hook/CTA, write fresh content, pick images.
@@ -10,7 +12,7 @@ import { ctaPosition, withDefaults, type CampaignLayout, type SlideKind, type Sl
 export class CampaignNotReadyError extends Error {}
 
 type Candidate = { id: string; favorite: boolean; description: string | null };
-type PlannedSlide = { kind: SlideKind; text: string; layout: Omit<SlideLayout, "libraryId">; libraryId: string };
+type PlannedSlide = { kind: SlideKind; text: string; layout: Omit<SlideLayout, "libraryId">; libraryId: string | null };
 
 const HISTORY_POSTS = 200;
 /** How many of the least recently used images per library the AI may choose from (keeps variety). */
@@ -54,6 +56,8 @@ export async function buildPost(
     .single();
   if (error) throw error;
   const layout: CampaignLayout = withDefaults(c.layout);
+  const automatic = c.image_mode === "auto";
+  if (automatic) requireImageGenerationKey();
 
   const [{ data: hooks }, { data: ctas }, { data: history }] = await Promise.all([
     db.from("campaign_hooks").select("id, text").eq("campaign_id", campaignId).eq("enabled", true),
@@ -69,7 +73,7 @@ export async function buildPost(
   if (!hooks?.length) throw new CampaignNotReadyError("Add at least one active hook.");
   const kinds: SlideKind[] = ["hook", "content", ...(c.cta_enabled ? (["cta"] as const) : [])];
   for (const kind of kinds) {
-    if (!layout[kind].libraryId) throw new CampaignNotReadyError(`Choose an image library for the ${kind} slides.`);
+    if (!automatic && !layout[kind].libraryId) throw new CampaignNotReadyError(`Choose an image library for the ${kind} slides.`);
   }
 
   // ─── Usage history ───────────────────────────────────────────────────────
@@ -127,7 +131,7 @@ export async function buildPost(
 
   const snapshot = (kind: SlideKind) => {
     const { libraryId, ...rest } = layout[kind];
-    return { libraryId: libraryId!, layout: rest };
+    return { libraryId, layout: rest };
   };
   const planned: PlannedSlide[] = [
     { kind: "hook", text: hook.text, ...snapshot("hook") },
@@ -138,6 +142,31 @@ export async function buildPost(
   }
 
   // ─── Images ──────────────────────────────────────────────────────────────
+  if (automatic) {
+    const settings = imageSettingsSchema.parse({ ...DEFAULT_IMAGE_SETTINGS, ...c });
+    const prompts = await planSlideImages({
+      product, style: settings.image_style,
+      slides: planned.map((s) => ({ kind: s.kind, text: s.text, box: s.layout.box })),
+    });
+    // Persist before expensive image calls. Each worker invocation fills one slide and
+    // commits progress; a closed browser or function timeout does not lose the post.
+    const { data: post, error: postError } = await db.from("posts").insert({
+      workspace_id: workspaceId, campaign_id: campaignId, tiktok_account_id: c.tiktok_account_id,
+      status: "generating", scheduled_for: scheduledFor, hook_id: hook.id, cta_id: cta?.id ?? null, caption,
+      image_generation: { ...settings, targetStatus: status },
+    }).select("id").single();
+    if (postError) throw postError;
+    const { error: slidesError } = await db.from("post_slides").insert(planned.map((s, position) => ({
+      post_id: post.id, position, kind: s.kind, text: s.text, layout: s.layout,
+      visual_prompt: prompts[position], image_library_id: s.libraryId,
+    })));
+    if (slidesError) {
+      await db.from("posts").delete().eq("id", post.id).eq("workspace_id", workspaceId);
+      throw slidesError;
+    }
+    return post.id;
+  }
+
   const libraryIds = [...new Set(planned.map((s) => s.libraryId))];
   const { data: libraryAssets, error: laError } = await db
     .from("library_assets")
@@ -154,7 +183,7 @@ export async function buildPost(
   }
 
   for (const s of planned) {
-    if (!candidatesByLibrary.get(s.libraryId)?.length) {
+    if (!candidatesByLibrary.get(s.libraryId!)?.length) {
       throw new CampaignNotReadyError(`The ${s.kind} library has no usable (unlocked) images.`);
     }
   }
@@ -164,7 +193,7 @@ export async function buildPost(
   let matched: (string | null)[] = planned.map(() => null);
   if (c.image_matching !== false) {
     const pools = planned.map((s) =>
-      [...candidatesByLibrary.get(s.libraryId)!]
+      [...candidatesByLibrary.get(s.libraryId!)!]
         .filter((a) => a.description)
         .sort((a, b) => (assetLastUsed.get(a.id) ?? 0) - (assetLastUsed.get(b.id) ?? 0))
         .slice(0, MATCH_POOL),
@@ -187,7 +216,7 @@ export async function buildPost(
   const taken = new Set<string>(matched.filter((id): id is string => !!id));
   const assetIds: string[] = [];
   planned.forEach((s, i) => {
-    const id = matched[i] ?? pickImage(candidatesByLibrary.get(s.libraryId)!, assetLastUsed, taken, assetIds.at(-1) ?? null);
+    const id = matched[i] ?? pickImage(candidatesByLibrary.get(s.libraryId!)!, assetLastUsed, taken, assetIds.at(-1) ?? null);
     taken.add(id);
     assetIds.push(id);
   });

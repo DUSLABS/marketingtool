@@ -2,6 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { screenshotSlides } from "@/lib/render/browser";
 import { createRenderToken } from "@/lib/render/token";
+import { validateSocialImage } from "./social-images";
 
 /**
  * Renders every slide of a post to a JPEG via the /render page and stores them in the
@@ -10,15 +11,17 @@ import { createRenderToken } from "@/lib/render/token";
 export async function renderPost(db: SupabaseClient, { postId, workspaceId, baseUrl }: { postId: string; workspaceId: string; baseUrl: string }) {
   const { data: slides, error } = await db
     .from("post_slides")
-    .select("id, position, post:posts!inner(workspace_id)")
+    .select("id, position, asset_id, post:posts!inner(workspace_id)")
     .eq("post_id", postId)
     .eq("post.workspace_id", workspaceId)
     .order("position");
   if (error) throw error;
   if (!slides.length) throw new Error("Post has no slides");
+  if (slides.some((s) => !s.asset_id)) throw new Error("Wait until every slide has a matching image before rendering.");
 
   const url = `${baseUrl}/render/${postId}?token=${encodeURIComponent(createRenderToken(postId))}`;
   const images = await screenshotSlides(url, slides.length);
+  await Promise.all(images.map(validateSocialImage));
 
   await Promise.all(
     slides.map(async (slide, i) => {

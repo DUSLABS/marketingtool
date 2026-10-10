@@ -11,7 +11,7 @@ export async function publishPost(db: SupabaseClient, { postId, workspaceId }: {
   const { data: post, error } = await db
     .from("posts")
     .select(
-      "id, status, caption, campaign:campaigns(tiktok_account_id, publish_mode, privacy_level, allow_comments, disclose_commercial, ai_label), post_slides(position, text, rendered_path)",
+      "id, status, caption, campaign:campaigns(tiktok_account_id, publish_mode, privacy_level, allow_comments, disclose_commercial, ai_label), post_slides(position, text, rendered_path, asset:assets(source))",
     )
     .eq("id", postId)
     .eq("workspace_id", workspaceId)
@@ -26,12 +26,12 @@ export async function publishPost(db: SupabaseClient, { postId, workspaceId }: {
     disclose_commercial: boolean;
     ai_label: boolean;
   };
-  const slides = (post.post_slides as { position: number; text: string; rendered_path: string | null }[]).sort(
+  const slides = (post.post_slides as unknown as { position: number; text: string; rendered_path: string | null; asset: { source: string } | null }[]).sort(
     (a, b) => a.position - b.position,
   );
 
   if (!campaign.tiktok_account_id) throw new PublishNotReadyError("Choose a TikTok account in the campaign's Publish tab.");
-  if (slides.some((s) => !s.rendered_path)) throw new PublishNotReadyError("Render the post before sending it to TikTok.");
+  if (!slides.length || post.status === "generating" || slides.some((s) => !s.rendered_path)) throw new PublishNotReadyError("Finish creating and rendering the post before sending it to TikTok.");
   if (["uploading", "in_drafts", "published"].includes(post.status)) {
     throw new PublishNotReadyError("This post was already sent to TikTok.");
   }
@@ -56,7 +56,7 @@ export async function publishPost(db: SupabaseClient, { postId, workspaceId }: {
     privacyLevel: campaign.privacy_level ?? undefined,
     allowComments: campaign.allow_comments,
     discloseCommercial: campaign.disclose_commercial,
-    isAigc: campaign.ai_label,
+    isAigc: campaign.ai_label || slides.some((s) => s.asset?.source === "generated"),
   });
 
   const { error: updateError } = await db

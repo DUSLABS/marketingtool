@@ -55,8 +55,9 @@ import { CopyList } from "./copy-list";
 import { PublishSettings, type PublishAccount } from "./publish-settings";
 import { PostEditorDialog } from "./post-editor";
 import { hookItemCount } from "@/lib/slides/hooks";
+import type { ImageSettings } from "@/lib/slides/image-policy";
 
-export type EditorCampaign = {
+export type EditorCampaign = ImageSettings & {
   id: string;
   name: string;
   status: string;
@@ -266,7 +267,7 @@ export function CampaignEditor({
         return void toast.error(res.error, { duration: 10_000 });
       }
       if (kind === "generate") setGeneratedPost({ id: res.data, generating: false });
-      else toast.success("Post sent to TikTok", { action: { label: "View", onClick: () => router.push(postsHref) } });
+      else toast.success(res.data === "GENERATING" ? "Creating images. The post will be sent when ready." : "Post sent to TikTok", { action: { label: "View", onClick: () => router.push(postsHref) } });
       router.refresh();
     });
   }
@@ -1047,6 +1048,42 @@ function ContentSettings({
       </div>
 
       <div className="space-y-2">
+        <Label className="text-muted-foreground">Image source</Label>
+        <Segmented
+          value={campaign.image_mode}
+          onChange={(image_mode) => patch({ image_mode })}
+          options={[
+            { value: "auto", label: "Automatic · reuse or create" },
+            { value: "library", label: "Library only" },
+          ]}
+        />
+        <p className="text-xs text-muted-foreground">
+          Automatic finds an image that illustrates each slide, or creates and checks a new one. Images are saved to your library automatically. No uploads required.
+        </p>
+        {campaign.image_mode === "auto" && (
+          <div className="space-y-3 rounded-xl border border-border p-3">
+            <Label htmlFor="image_style">Visual style</Label>
+            <Textarea id="image_style" rows={3} maxLength={2000} value={campaign.image_style}
+              onChange={(e) => patch({ image_style: e.target.value })} />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label htmlFor="image_max_uses">Max. uses per image</Label>
+                <Input id="image_max_uses" type="number" min={1} max={20} value={campaign.image_max_uses}
+                  onChange={(e) => { const n = Number(e.target.value); if (Number.isInteger(n) && n >= 1 && n <= 20) patch({ image_max_uses: n }); }} />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="image_cooldown_days">Days before reuse</Label>
+                <Input id="image_cooldown_days" type="number" min={0} max={365} value={campaign.image_cooldown_days}
+                  onChange={(e) => { const n = Number(e.target.value); if (Number.isInteger(n) && n >= 0 && n <= 365) patch({ image_cooldown_days: n }); }} />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">Limits apply across this campaign, including prepared posts. Each post uses distinct images. New images are created only when no suitable, eligible image is found.</p>
+            <p className="text-xs text-muted-foreground">TikTok photo slides · 1080 × 1920 · 9:16 · JPEG. Motifs are checked after cropping, with space reserved for text and TikTok controls.</p>
+          </div>
+        )}
+      </div>
+
+      {campaign.image_mode === "library" && <div className="space-y-2">
         <Label className="text-muted-foreground">Image choice</Label>
         <Segmented
           value={campaign.image_matching ? "match" : "rotate"}
@@ -1061,7 +1098,7 @@ function ContentSettings({
             ? "For every generated post the AI picks the photo that best fits each slide, from the images not used recently. Images need to be analysed once in the Library."
             : "Images rotate through each library: least recently used first, favorites more often."}
         </p>
-      </div>
+      </div>}
 
       <div className="space-y-2">
         <Label htmlFor="style_examples" className="text-muted-foreground">

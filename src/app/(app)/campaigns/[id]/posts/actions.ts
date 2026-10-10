@@ -1,6 +1,7 @@
 "use server";
 
 import { headers } from "next/headers";
+import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import Anthropic from "@anthropic-ai/sdk";
 import { getWorkspace } from "@/lib/workspace";
@@ -8,9 +9,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { buildPost, CampaignNotReadyError } from "@/lib/engine/build-post";
 import { renderPost } from "@/lib/engine/render-post";
 import { publishErrorMessage, publishPost, syncPublishStatus } from "@/lib/engine/publish-post";
-import { rewriteSlide, type CampaignContext, type ProductContext } from "@/lib/ai/generate";
+import { planSlideImages, rewriteSlide, type CampaignContext, type ProductContext } from "@/lib/ai/generate";
 import { signPaths } from "@/lib/storage";
 import { withDefaults, type ImageCrop, type SlideKind, type SlideLayout } from "@/lib/slides/types";
+import { advanceAutomaticImages } from "@/lib/engine/automatic-images";
+import { imageSettingsSchema } from "@/lib/slides/image-policy";
 
 export type ActionResult<T = void> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -44,6 +47,16 @@ export async function generatePost(campaignId: string): Promise<ActionResult<str
     return { ok: false, error: message(e) };
   }
 
+  const { data: created, error: createdError } = await db.from("posts").select("status")
+    .eq("id", postId).eq("workspace_id", workspaceId).single();
+  if (createdError) return { ok: false, error: createdError.message };
+  if (created.status === "generating") {
+    const url = await baseUrl();
+    after(() => advanceAutomaticImages(db, { postId, workspaceId, baseUrl: url }).catch(console.error));
+    revalidatePath(`/campaigns/${campaignId}/posts`);
+    return { ok: true, data: postId };
+  }
+
   try {
     await renderPost(db, { postId, workspaceId, baseUrl: await baseUrl() });
   } catch (e) {
@@ -60,6 +73,24 @@ export async function generatePost(campaignId: string): Promise<ActionResult<str
 export async function rerenderPost(postId: string): Promise<ActionResult> {
   const { supabase, workspaceId } = await getWorkspace();
   try {
+    const { data: post, error } = await supabase.from("posts").select("status, image_generation, tiktok_publish_id")
+      .eq("id", postId).eq("workspace_id", workspaceId).single();
+    if (error) throw error;
+    if (post.tiktok_publish_id) throw new Error("This post was already sent to TikTok.");
+    if (post.image_generation && ["generating", "failed"].includes(post.status)) {
+      if (post.status === "failed") {
+        const { error: resetError } = await supabase.from("post_slides").update({ image_attempts: 0 })
+          .eq("post_id", postId).is("asset_id", null);
+        if (resetError) throw resetError;
+        const { error: statusError } = await supabase.from("posts").update({ status: "generating", error: null })
+          .eq("id", postId).eq("status", "failed");
+        if (statusError) throw statusError;
+      }
+      const url = await baseUrl();
+      after(() => advanceAutomaticImages(createAdminClient(), { postId, workspaceId, baseUrl: url }).catch(console.error));
+      revalidatePath("/campaigns", "layout");
+      return { ok: true, data: undefined };
+    }
     await renderPost(createAdminClient(), { postId, workspaceId, baseUrl: await baseUrl() });
     await supabase.from("posts").update({ status: "preview", error: null }).eq("id", postId).eq("status", "failed");
   } catch (e) {
@@ -131,6 +162,17 @@ export async function refreshPostStatus(postId: string): Promise<ActionResult<st
 export async function generateAndSendPost(campaignId: string): Promise<ActionResult<string>> {
   const generated = await generatePost(campaignId);
   if (!generated.ok) return generated;
+  const { supabase, workspaceId } = await getWorkspace();
+  const { data: post, error } = await supabase.from("posts").select("image_generation")
+    .eq("id", generated.data).eq("workspace_id", workspaceId).single();
+  if (error) return { ok: false, error: error.message };
+  if (post.image_generation) {
+    const { error: queueError } = await supabase.from("posts").update({
+      image_generation: { ...post.image_generation, targetStatus: "queued" },
+    }).eq("id", generated.data).eq("workspace_id", workspaceId);
+    if (queueError) return { ok: false, error: queueError.message };
+    return { ok: true, data: "GENERATING" };
+  }
   const sent = await sendPostToTikTok(generated.data);
   if (!sent.ok) return { ok: false, error: `Post created, but sending failed: ${sent.error}` };
   return sent;
@@ -146,12 +188,15 @@ export type EditorSlide = {
   assetId: string | null;
   imageUrl: string | null;
   imageCrop: ImageCrop | null;
+  regenerateImage?: boolean;
 };
 
 export type EditorPost = {
   id: string;
   campaignId: string;
   status: string;
+  error: string | null;
+  automaticImages: boolean;
   caption: string;
   sentToTikTok: boolean;
   slides: EditorSlide[];
@@ -170,7 +215,7 @@ export async function getPostForEditor(postId: string): Promise<ActionResult<Edi
   const { supabase } = await getWorkspace();
   const { data: post, error } = await supabase
     .from("posts")
-    .select("id, campaign_id, status, caption, tiktok_publish_id, post_slides(id, position, kind, text, layout, asset:assets(id, thumb_path, crop))")
+    .select("id, campaign_id, status, image_generation, error, caption, tiktok_publish_id, post_slides(id, position, kind, text, layout, asset:assets(id, thumb_path, crop))")
     .eq("id", postId)
     .single();
   if (error || !post) return { ok: false, error: "Post not found" };
@@ -183,6 +228,8 @@ export async function getPostForEditor(postId: string): Promise<ActionResult<Edi
       id: post.id,
       campaignId: post.campaign_id,
       status: post.status,
+      error: post.error,
+      automaticImages: !!post.image_generation,
       caption: post.caption ?? "",
       sentToTikTok: !!post.tiktok_publish_id,
       slides: rows.map((r) => ({
@@ -196,6 +243,18 @@ export async function getPostForEditor(postId: string): Promise<ActionResult<Edi
       })),
     },
   };
+}
+
+/** Authenticated continuation; each request does at most one slide. Cron also resumes jobs. */
+export async function continuePostGeneration(postId: string): Promise<ActionResult> {
+  const { workspaceId } = await getWorkspace();
+  try {
+    await advanceAutomaticImages(createAdminClient(), { postId, workspaceId, baseUrl: await baseUrl() });
+    revalidatePath("/campaigns", "layout");
+    return { ok: true, data: undefined };
+  } catch (e) {
+    return { ok: false, error: message(e) };
+  }
 }
 
 /** AI rewrite of one slide, given the (possibly edited) texts of the whole post. */
@@ -281,21 +340,66 @@ export async function pickOtherImage(
 /** Saves edited slides and caption, then re-renders the post. */
 export async function savePostEdits(
   postId: string,
-  edits: { caption: string; slides: { id: string; text: string; layout: EditorSlide["layout"]; assetId: string | null }[] },
+  edits: { caption: string; slides: { id: string; text: string; layout: EditorSlide["layout"]; assetId: string | null; regenerateImage?: boolean }[] },
 ): Promise<ActionResult> {
   const { supabase, workspaceId } = await getWorkspace();
-  const { data: post } = await supabase.from("posts").select("id, tiktok_publish_id, status").eq("id", postId).single();
+  const { data: post } = await supabase.from("posts")
+    .select("id, tiktok_publish_id, status, image_generation, post_slides(id, kind, text, asset_id), campaign:campaigns(product:products(name, description, facts, voice, avoid))")
+    .eq("id", postId).eq("workspace_id", workspaceId).single();
   if (!post) return { ok: false, error: "Post not found" };
   if (post.tiktok_publish_id && post.status !== "failed") return { ok: false, error: "This post was already sent to TikTok." };
+  if (post.status === "generating") return { ok: false, error: "Wait until the images are ready before editing." };
+  const existing = post.post_slides as { id: string; kind: SlideKind; text: string; asset_id: string | null }[];
+  if (edits.slides.length !== existing.length || new Set(edits.slides.map((s) => s.id)).size !== existing.length ||
+    edits.slides.some((s) => !existing.some((old) => old.id === s.id))) {
+    return { ok: false, error: "The slides have changed. Reopen the post before saving." };
+  }
+  const assetIds = [...new Set(edits.slides.map((s) => s.assetId).filter((id): id is string => !!id))];
+  if (assetIds.length) {
+    const { data: assets, error: assetsError } = await supabase.from("assets").select("id")
+      .eq("workspace_id", workspaceId).in("id", assetIds);
+    if (assetsError || assets.length !== assetIds.length) return { ok: false, error: "One or more images are not available in this workspace." };
+  }
+  const changed = new Set(edits.slides.filter((s) => {
+    const old = existing.find((r) => r.id === s.id)!;
+    return post.image_generation && (s.regenerateImage || (old.text !== s.text && old.asset_id === s.assetId));
+  }).map((s) => s.id));
+  let prompts: string[] = [];
+  if (changed.size) {
+    try {
+      const settings = imageSettingsSchema.parse(post.image_generation);
+      const campaign = post.campaign as unknown as { product: ProductContext | null };
+      prompts = await planSlideImages({
+        product: campaign.product, style: settings.image_style,
+        slides: edits.slides.map((s) => ({ kind: existing.find((r) => r.id === s.id)!.kind, text: s.text, box: s.layout.box })),
+      });
+    } catch (e) {
+      return { ok: false, error: message(e) };
+    }
+  }
 
   const results = await Promise.all([
     supabase.from("posts").update({ caption: edits.caption }).eq("id", postId),
-    ...edits.slides.map((s) =>
-      supabase.from("post_slides").update({ text: s.text, layout: s.layout, asset_id: s.assetId }).eq("id", s.id).eq("post_id", postId),
+    ...edits.slides.map((s, i) =>
+      supabase.from("post_slides").update({ text: s.text, layout: s.layout, asset_id: s.assetId,
+        ...(changed.has(s.id) ? {
+          asset_id: null, rendered_path: null, visual_prompt: prompts[i], image_attempts: 0,
+          image_rejected_assets: s.regenerateImage && s.assetId ? [s.assetId] : [],
+        } : {}),
+      }).eq("id", s.id).eq("post_id", postId),
     ),
   ]);
   const failed = results.find((r) => r.error);
   if (failed?.error) return { ok: false, error: failed.error.message };
+
+  if (changed.size) {
+    const { error } = await supabase.from("posts").update({ status: "generating", error: null }).eq("id", postId);
+    if (error) return { ok: false, error: error.message };
+    const url = await baseUrl();
+    after(() => advanceAutomaticImages(createAdminClient(), { postId, workspaceId, baseUrl: url }).catch(console.error));
+    revalidatePath("/campaigns", "layout");
+    return { ok: true, data: undefined };
+  }
 
   try {
     await renderPost(createAdminClient(), { postId, workspaceId, baseUrl: await baseUrl() });

@@ -113,7 +113,7 @@ ${c.styleExamples.trim()}
 async function parse<T extends z.ZodType>(
   schema: T,
   prompt: string,
-  { maxTokens = 4000, effort = "medium" }: { maxTokens?: number; effort?: "medium" | "high" } = {},
+  { maxTokens = 4000, effort = "medium", timeout = 120_000 }: { maxTokens?: number; effort?: "medium" | "high"; timeout?: number } = {},
 ): Promise<z.infer<T>> {
   const response = await client.beta.messages.parse({
     model: MODEL,
@@ -123,7 +123,7 @@ async function parse<T extends z.ZodType>(
     output_config: { effort, format: betaZodOutputFormat(schema) },
     system: SYSTEM,
     messages: [{ role: "user", content: prompt }],
-  });
+  }, { timeout, maxRetries: 0 });
 
   if (response.stop_reason === "refusal") throw new Error("The AI declined this request. Try rephrasing the prompt.");
   if (response.stop_reason === "max_tokens") throw new Error("The AI response was cut off. Try again.");
@@ -433,7 +433,7 @@ export async function describeImage(imageUrl: string) {
         ],
       },
     ],
-  });
+  }, { timeout: 20_000, maxRetries: 0 });
   if (!response.parsed_output) throw new Error("Could not describe the image");
   return clean(response.parsed_output.description).trim();
 }
@@ -474,4 +474,77 @@ For every slide pick the candidate (by its number in that slide's list) whose ph
     used.add(candidate.id);
     return candidate.id;
   });
+}
+
+/** One shared visual direction, with a concrete scene derived from each final slide. */
+export async function planSlideImages(input: {
+  product: ProductContext | null;
+  style: string;
+  slides: { kind: string; text: string; box: { x: number; y: number; w: number } }[];
+}) {
+  const keys = input.slides.map((_, i) => `slide_${i + 1}`);
+  const result = await parse(
+    z.object(Object.fromEntries(keys.map((key) => [key, z.string()]))) as z.ZodType<Record<string, string>>,
+    `${productBlock(input.product)}
+Visual style: ${input.style}
+Final slideshow: ${JSON.stringify(input.slides)}
+
+Act as the art director. Write one detailed English image prompt per slide, in order.
+All images must share the visual style, lighting and palette while showing different concrete scenes.
+Illustrate the EXACT action, objects, people and setting implied by that slide's text, using the hook to resolve context.
+Do not settle for a generic photo of the topic. For advice, depict its tangible outcome or action.
+Hook images communicate the main promise. CTA images communicate the product's use case without inventing its interface.
+Never invent app screenshots, product packaging, logos, claims or testimonials. Never render any lettering or slide text in the image.
+Use portrait 9:16 composition. Keep important subjects away from the bottom 22% and right 14%.
+Each slide's box specifies its overlay text center x/y and width w as fractions of the canvas: leave quiet negative space there.
+Include composition, subject placement and concrete scene details in every prompt.`,
+    { effort: "high", maxTokens: 6000 },
+  );
+  return keys.map((key) => {
+    if (!result[key]?.trim()) throw new Error("The AI returned an empty image brief. Try again.");
+    return result[key].trim();
+  });
+}
+
+/** Reject an unsuitable catalogue rather than forcing the least-bad match. */
+export async function chooseRelevantImage(input: { text: string; prompt: string; candidates: MatchCandidate[] }) {
+  if (!input.candidates.length) return null;
+  const { candidate } = await parse(
+    z.object({ candidate: z.number().int() }),
+    `Choose a photo only if it actually illustrates this slide. Return 0 if none fits.
+Slide text: ${input.text}
+Required scene and visual style: ${input.prompt}
+Catalogue: ${JSON.stringify(input.candidates.map((c, i) => ({ number: i + 1, description: c.description })))}
+Match the concrete people, objects, action and setting, not merely the broad topic.
+Do not pick an image that contradicts the text, invents product details, or has an incompatible style.
+Return the candidate number, or 0.`,
+    { maxTokens: 500, timeout: 20_000 },
+  );
+  return input.candidates[candidate - 1]?.id ?? null;
+}
+
+/** Inspect the actual image, not the generation prompt, before accepting it. */
+export async function reviewSlideImage(input: { base64: string; text: string; prompt: string }) {
+  const response = await client.beta.messages.parse({
+    model: MODEL,
+    max_tokens: 1200,
+    betas: ["server-side-fallback-2026-07-01"],
+    fallbacks: "default",
+    output_config: {
+      effort: "low",
+      format: betaZodOutputFormat(z.object({ fits: z.boolean(), description: z.string(), reason: z.string() })),
+    },
+    messages: [{ role: "user", content: [
+      { type: "image", source: { type: "base64", media_type: "image/jpeg", data: input.base64 } },
+      { type: "text", text: `Check this actual slideshow background against the brief.
+Slide text: ${input.text}
+Visual brief: ${input.prompt}
+Accept only if the photo illustrates the slide's concrete meaning without contradictions and follows the style and composition.
+Reject obvious visual defects, invented app interfaces/logos, watermarks or prominent generated lettering.
+Check that important subjects won't be hidden by the text area described in the brief.
+Describe what is ACTUALLY visible in plain English for future matching. Give a short rejection reason, or an empty reason if it fits.` },
+    ] }],
+  }, { timeout: 45_000, maxRetries: 0 });
+  if (!response.parsed_output) throw new Error("Image review failed. The image was not accepted.");
+  return clean(response.parsed_output);
 }
