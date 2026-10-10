@@ -10,6 +10,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { PostEditorDialog } from "../post-editor";
+import { HookPicker, type PickerHook } from "../hook-picker";
 import { deletePost, generatePost, refreshPostStatus, rerenderPost, sendPostToTikTok, updatePostCaption } from "./actions";
 
 export type PostSummary = {
@@ -42,15 +43,25 @@ const TIKTOK_STATUS: Record<string, string> = {
   FAILED: "TikTok rejected the post.",
 };
 
-export function PostsView({ campaign, posts }: { campaign: { id: string; name: string; hasAccount: boolean }; posts: PostSummary[] }) {
+export function PostsView({
+  campaign,
+  hooks,
+  posts,
+}: {
+  campaign: { id: string; name: string; hasAccount: boolean };
+  hooks: PickerHook[];
+  posts: PostSummary[];
+}) {
   const router = useRouter();
   const [generating, startGenerating] = useTransition();
+  // null = rotate through the active hooks, as scheduled posts do.
+  const [hookId, setHookId] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ id: string | null; generating: boolean } | null>(null);
 
   function generate() {
     setEditing({ id: null, generating: true });
     startGenerating(async () => {
-      const res = await generatePost(campaign.id);
+      const res = await generatePost(campaign.id, hookId);
       if (!res.ok) {
         setEditing(null);
         toast.error(res.error, { duration: 10_000 });
@@ -73,10 +84,13 @@ export function PostsView({ campaign, posts }: { campaign: { id: string; name: s
           <h1 className="text-lg font-semibold">{campaign.name}</h1>
           <p className="text-sm text-muted-foreground">Generated posts. Download a ZIP to post manually until TikTok is connected.</p>
         </div>
-        <Button onClick={generate} disabled={generating} className={cn("ml-auto", generating ? "glow" : "glow-hover")}>
-          <Sparkles className={cn(generating && "animate-pulse")} />
-          {generating ? "Planning your post…" : "Generate post"}
-        </Button>
+        <div className="ml-auto flex items-center gap-2">
+          {hooks.length > 0 && <HookPicker hooks={hooks} value={hookId} onChange={setHookId} allowRotation disabled={generating} />}
+          <Button onClick={generate} disabled={generating} className={cn(generating ? "glow" : "glow-hover")}>
+            <Sparkles className={cn(generating && "animate-pulse")} />
+            {generating ? "Planning your post…" : "Generate post"}
+          </Button>
+        </div>
       </div>
 
       {posts.length === 0 && !generating && (

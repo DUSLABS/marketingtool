@@ -116,7 +116,7 @@ export async function deleteCampaign(id: string) {
 type Table = "campaign_hooks" | "campaign_ctas";
 export type CopyItem = { id: string; text: string; enabled: boolean; source: "manual" | "ai"; style?: string | null };
 
-async function insertItems(table: Table, campaignId: string, rows: { text: string; source: "manual" | "ai"; style?: string }[]) {
+async function insertItems(table: Table, campaignId: string, rows: { text: string; source: "manual" | "ai"; style?: string; enabled?: boolean }[]) {
   const { supabase } = await getWorkspace();
   const { data, error } = await supabase
     .from(table)
@@ -195,10 +195,11 @@ export async function aiGenerateHooks(campaignId: string, count = 8) {
     const { supabase, campaign, product } = await loadContext(campaignId);
     const { data: existing } = await supabase.from("campaign_hooks").select("text").eq("campaign_id", campaignId);
     const hooks = await generateHooks({ product, campaign, existing: (existing ?? []).map((h) => h.text), count });
+    // Suggestions start switched off: only hooks the user approved become the base of a post.
     return insertItems(
       "campaign_hooks",
       campaignId,
-      hooks.map((h) => ({ text: h.text, style: h.style, source: "ai" as const })),
+      hooks.map((h) => ({ text: h.text, style: h.style, source: "ai" as const, enabled: false })),
     );
   });
 }
@@ -208,7 +209,7 @@ export async function aiGenerateCtas(campaignId: string, count = 5) {
     const { supabase, campaign, product } = await loadContext(campaignId);
     const { data: existing } = await supabase.from("campaign_ctas").select("text").eq("campaign_id", campaignId);
     const ctas = await generateCtas({ product, campaign, existing: (existing ?? []).map((c) => c.text), count });
-    return insertItems("campaign_ctas", campaignId, ctas.map((text) => ({ text, source: "ai" as const })));
+    return insertItems("campaign_ctas", campaignId, ctas.map((text) => ({ text, source: "ai" as const, enabled: false })));
   });
 }
 

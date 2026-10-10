@@ -14,6 +14,7 @@ export default async function CampaignPostsPage({ params }: PageProps<"/campaign
   const { data: campaign } = await supabase.from("campaigns").select("id, name, tiktok_account_id").eq("id", id).maybeSingle();
   if (!campaign) notFound();
 
+  const { data: hooks } = await supabase.from("campaign_hooks").select("id, text, enabled").eq("campaign_id", id).order("created_at");
   const { data: rows, error } = await supabase
     .from("posts")
     .select("id, status, caption, error, created_at, scheduled_for, tiktok_publish_id, post_slides(id, position, kind, text, rendered_path)")
@@ -39,5 +40,5 @@ export default async function CampaignPostsPage({ params }: PageProps<"/campaign
       .map((s) => ({ id: s.id, kind: s.kind, text: s.text, url: s.rendered_path ? (urls.get(s.rendered_path) ?? null) : null })),
   }));
 
-  return <PostsView campaign={{ id: campaign.id, name: campaign.name, hasAccount: !!campaign.tiktok_account_id }} posts={posts} />;
+  return <PostsView campaign={{ id: campaign.id, name: campaign.name, hasAccount: !!campaign.tiktok_account_id }} hooks={hooks ?? []} posts={posts} />;
 }

@@ -52,6 +52,7 @@ import {
 } from "../actions";
 import { generateAndSendPost, generatePost } from "./posts/actions";
 import { CopyList } from "./copy-list";
+import { HookPicker } from "./hook-picker";
 import { PublishSettings, type PublishAccount } from "./publish-settings";
 import { PostEditorDialog } from "./post-editor";
 import { hookItemCount } from "@/lib/slides/hooks";
@@ -192,7 +193,9 @@ export function CampaignEditor({
 
   // ─── Slides shown in the strip ────────────────────────────────────────────
   const enabledHooks = hooks.filter((h) => h.enabled);
-  const hookText = hooks.find((h) => h.id === previewHookId)?.text ?? enabledHooks[0]?.text ?? "";
+  // The hook on the first slide is also the one Generate builds the next post on.
+  const previewHook = hooks.find((h) => h.id === previewHookId) ?? enabledHooks[0] ?? null;
+  const hookText = previewHook?.text ?? "";
   const ctaText = ctas.find((c) => c.id === previewCtaId)?.text ?? ctas.find((c) => c.enabled)?.text ?? "";
   // A numbered hook sets how many content slides its posts get ("6 ways…" → 6).
   const contentCount = previewSlides?.length ?? hookItemCount(hookText) ?? campaign.content_slide_count;
@@ -260,7 +263,7 @@ export function CampaignEditor({
     if (kind === "generate") setGeneratedPost({ id: null, generating: true });
     startPost(async () => {
       await flush();
-      const res = kind === "send" ? await generateAndSendPost(campaign.id) : await generatePost(campaign.id);
+      const res = kind === "send" ? await generateAndSendPost(campaign.id, previewHook?.id) : await generatePost(campaign.id, previewHook?.id);
       setPostAction(null);
       if (!res.ok) {
         setGeneratedPost(null);
@@ -300,6 +303,7 @@ export function CampaignEditor({
           <Link href={postsHref} onClick={() => void flush()} className={cn(buttonVariants({ variant: "outline" }), "h-9")}>
             Posts{postCount ? ` (${postCount})` : ""}
           </Link>
+          <HookPicker hooks={hooks} value={previewHook?.id ?? null} onChange={setPreviewHookId} disabled={postBusy} />
           <Button
             variant="outline"
             className="h-9"
@@ -348,7 +352,7 @@ export function CampaignEditor({
                 inTab={s.kind === tab}
                 selected={isSelected}
                 showSafeArea={showSafeArea}
-                label={s.kind === "hook" ? `Hook · ${enabledHooks.length} rotating` : s.kind === "cta" ? "CTA" : "Content"}
+                label={s.kind === "hook" ? "Hook · next post" : s.kind === "cta" ? "CTA" : "Content"}
                 onSelect={() => select(s.kind, s.index)}
                 onBoxChange={(box) => setKindLayout(s.kind, { box })}
                 onBadgeChange={s.kind === "cta" ? (badge) => setKindLayout("cta", { badge }) : undefined}

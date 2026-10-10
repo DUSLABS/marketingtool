@@ -18,8 +18,20 @@ import {
 } from "../actions";
 
 const COPY = {
-  hook: { placeholder: "Type a hook, press Enter to add", noun: "hook", generate: "Generate hooks" },
-  cta: { placeholder: "Type a CTA, press Enter to add", noun: "CTA", generate: "Generate CTAs" },
+  hook: {
+    placeholder: "Type a hook, press Enter to add",
+    noun: "hook",
+    generate: "Generate hooks",
+    usage: "Generate builds on the hook you choose; scheduled posts rotate through the active ones.",
+    preview: "Show in preview and use for the next post",
+  },
+  cta: {
+    placeholder: "Type a CTA, press Enter to add",
+    noun: "CTA",
+    generate: "Generate CTAs",
+    usage: "Each post gets the active CTA that fits it best.",
+    preview: "Show in preview",
+  },
 } as const;
 
 /** Hooks or CTAs: the campaign picks one enabled item per post. */
@@ -72,7 +84,7 @@ export function CopyList({
       const res: AiResult<CopyItem[]> = kind === "hook" ? await aiGenerateHooks(campaignId) : await aiGenerateCtas(campaignId);
       if (!res.ok) return void toast.error(res.error);
       onItemsChange([...items, ...res.data]);
-      toast.success(`${res.data.length} ${copy.noun}s added`);
+      toast.success(`${res.data.length} ${copy.noun} suggestions added. Switch on the ones you want to use.`);
     });
   }
 
@@ -110,7 +122,7 @@ export function CopyList({
         <p className="text-sm text-muted-foreground">
           {items.length === 0
             ? `No ${copy.noun}s yet.`
-            : `${enabled} of ${items.length} ${copy.noun}s active, rotating one per post. Click to switch on/off.`}
+            : `${enabled} of ${items.length} ${copy.noun}s active. ${copy.usage} Click to switch on/off.`}
         </p>
         <Button variant="outline" size="sm" onClick={generate} disabled={generating} className="shrink-0 text-primary">
           <Sparkles className={cn(generating && "animate-pulse")} /> {generating ? "Writing…" : copy.generate}
@@ -142,7 +154,8 @@ export function CopyList({
             <button
               onClick={() => onPreview(item.id)}
               className="shrink-0 rounded-md p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground"
-              aria-label="Show in preview"
+              aria-label={copy.preview}
+              title={copy.preview}
             >
               <Eye className="size-3.5" />
             </button>

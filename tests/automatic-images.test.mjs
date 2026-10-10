@@ -220,3 +220,73 @@ test("catalogue search resumes through batches before generating, including a ma
   assert.equal(f.state.generated, 0);
   assert.equal(f.state.chosenPools.length, 3);
 });
+
+// ─── Hook choice ─────────────────────────────────────────────────────────────
+
+function campaignFixture(hooks) {
+  const seen = { contentHooks: [], imagePlans: [] };
+  const inserted = { posts: [], post_slides: [] };
+  const tables = {
+    campaigns: [{ id: "campaign", workspace_id: "ws", image_mode: "auto", layout: null, cta_enabled: false, language: "en",
+      content_prompt: "", content_slide_count: 2, web_research: false, tiktok_account_id: null, product: null }],
+    campaign_hooks: hooks.map((h) => ({ campaign_id: "campaign", ...h })), campaign_ctas: [], posts: [],
+  };
+  const from = (table) => {
+    let rows = tables[table] ?? [], single = false, payload = null;
+    const q = {
+      select() { return q; }, order() { return q; }, limit() { return q; },
+      eq(key, value) { rows = rows.filter((r) => r[key] === value); return q; },
+      single() { single = true; return q; },
+      insert(value) { payload = value; return q; },
+      then(accept, reject) {
+        if (payload) {
+          rows = [].concat(payload).map((row, i) => ({ id: `${table}-${inserted[table].length + i + 1}`, ...row }));
+          inserted[table].push(...rows);
+        }
+        return Promise.resolve({ data: single ? rows[0] : rows, error: null }).then(accept, reject);
+      },
+    };
+    return q;
+  };
+  const { buildPost } = load("src/lib/engine/build-post.ts", {
+    "@/lib/ai/generate": {
+      generateContentSlides: async ({ hook }) => { seen.contentHooks.push(hook); return { slides: ["1. First", "2. Second"], caption: "" }; },
+      planSlideImages: async ({ slides }) => { seen.imagePlans.push(slides); return slides.map((s) => `Scene for: ${s.text}`); },
+    },
+    "@/lib/ai/images": { requireImageGenerationKey: () => "test-key" },
+  });
+  const build = (hookId) => buildPost({ from }, { workspaceId: "ws", campaignId: "campaign", hookId });
+  return { seen, inserted, build };
+}
+
+test("a chosen hook is the verbatim base of content and images, even when switched off", async () => {
+  const f = campaignFixture([
+    { id: "active", text: "5 shots from your party nobody thinks to take", enabled: true },
+    { id: "suggestion", text: "POV: the reception ends and you have 4 photos of yourself", enabled: false },
+  ]);
+  await f.build("suggestion");
+  assert.equal(f.inserted.posts[0].hook_id, "suggestion");
+  assert.equal(f.inserted.post_slides[0].kind, "hook");
+  assert.equal(f.inserted.post_slides[0].text, "POV: the reception ends and you have 4 photos of yourself");
+  assert.deepEqual(f.seen.contentHooks, ["POV: the reception ends and you have 4 photos of yourself"]);
+  assert.equal(f.seen.imagePlans[0][0].text, "POV: the reception ends and you have 4 photos of yourself");
+  assert.equal(f.inserted.post_slides[0].visual_prompt, "Scene for: POV: the reception ends and you have 4 photos of yourself");
+});
+
+test("without a choice only active hooks rotate; a missing choice or no active hook stops the post", async () => {
+  const hooks = [
+    { id: "active", text: "5 shots from your party nobody thinks to take", enabled: true },
+    { id: "suggestion", text: "An unapproved AI suggestion", enabled: false },
+  ];
+  const rotating = campaignFixture(hooks);
+  for (let i = 0; i < 8; i++) await rotating.build();
+  assert.deepEqual([...new Set(rotating.inserted.posts.map((p) => p.hook_id))], ["active"]);
+
+  const deleted = campaignFixture(hooks);
+  await assert.rejects(deleted.build("deleted-hook"), /no longer exists/);
+  assert.equal(deleted.inserted.posts.length, 0);
+
+  const allOff = campaignFixture([hooks[1]]);
+  await assert.rejects(allOff.build(), /active hook/);
+  assert.equal(allOff.seen.contentHooks.length, 0);
+});

@@ -34,14 +34,17 @@ function message(e: unknown) {
   return e instanceof Error ? e.message : "Something went wrong.";
 }
 
-/** Builds a new post from the campaign and renders its slides (typically 20–60 s). */
-export async function generatePost(campaignId: string): Promise<ActionResult<string>> {
+/**
+ * Builds a new post from the campaign and renders its slides (typically 20–60 s).
+ * With a hook id the post is built on exactly that hook; without one the active hooks rotate.
+ */
+export async function generatePost(campaignId: string, hookId?: string | null): Promise<ActionResult<string>> {
   const { workspaceId } = await getWorkspace();
   const db = createAdminClient();
 
   let postId: string;
   try {
-    postId = await buildPost(db, { workspaceId, campaignId });
+    postId = await buildPost(db, { workspaceId, campaignId, hookId: typeof hookId === "string" ? hookId : null });
   } catch (e) {
     console.error(e);
     return { ok: false, error: message(e) };
@@ -159,8 +162,8 @@ export async function refreshPostStatus(postId: string): Promise<ActionResult<st
 }
 
 /** "Send to TikTok" in the editor: builds a fresh post and sends it right away. */
-export async function generateAndSendPost(campaignId: string): Promise<ActionResult<string>> {
-  const generated = await generatePost(campaignId);
+export async function generateAndSendPost(campaignId: string, hookId?: string | null): Promise<ActionResult<string>> {
+  const generated = await generatePost(campaignId, hookId);
   if (!generated.ok) return generated;
   const { supabase, workspaceId } = await getWorkspace();
   const { data: post, error } = await supabase.from("posts").select("image_generation")

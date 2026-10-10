@@ -41,11 +41,13 @@ function pickImage(candidates: Candidate[], lastUsed: Map<string, number>, taken
 
 export async function buildPost(
   db: SupabaseClient,
-  { workspaceId, campaignId, status = "preview", scheduledFor = null }: {
+  { workspaceId, campaignId, status = "preview", scheduledFor = null, hookId = null }: {
     workspaceId: string;
     campaignId: string;
     status?: "preview" | "queued";
     scheduledFor?: string | null;
+    /** Build on exactly this hook instead of rotating. A deliberate choice may be a switched-off hook. */
+    hookId?: string | null;
   },
 ): Promise<string> {
   const { data: c, error } = await db
@@ -60,7 +62,7 @@ export async function buildPost(
   if (automatic) requireImageGenerationKey();
 
   const [{ data: hooks }, { data: ctas }, { data: history }] = await Promise.all([
-    db.from("campaign_hooks").select("id, text").eq("campaign_id", campaignId).eq("enabled", true),
+    db.from("campaign_hooks").select("id, text, enabled").eq("campaign_id", campaignId),
     db.from("campaign_ctas").select("id, text").eq("campaign_id", campaignId).eq("enabled", true),
     db
       .from("posts")
@@ -70,7 +72,10 @@ export async function buildPost(
       .limit(HISTORY_POSTS),
   ]);
 
-  if (!hooks?.length) throw new CampaignNotReadyError("Add at least one active hook.");
+  const activeHooks = (hooks ?? []).filter((h) => h.enabled);
+  const chosenHook = hookId ? hooks?.find((h) => h.id === hookId) : null;
+  if (hookId && !chosenHook) throw new CampaignNotReadyError("The chosen hook no longer exists. Choose another hook.");
+  if (!chosenHook && !activeHooks.length) throw new CampaignNotReadyError("Add at least one active hook.");
   const kinds: SlideKind[] = ["hook", "content", ...(c.cta_enabled ? (["cta"] as const) : [])];
   for (const kind of kinds) {
     if (!automatic && !layout[kind].libraryId) throw new CampaignNotReadyError(`Choose an image library for the ${kind} slides.`);
@@ -89,7 +94,8 @@ export async function buildPost(
     }
   }
 
-  const hook = pickLeastUsed(hooks, hookUsage);
+  // The hook is the starting point of the post and is used verbatim: content, CTA and images follow it.
+  const hook = chosenHook ?? pickLeastUsed(activeHooks, hookUsage);
 
   // ─── Content ─────────────────────────────────────────────────────────────
   const campaign: CampaignContext = {
