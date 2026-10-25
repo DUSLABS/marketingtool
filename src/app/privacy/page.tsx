@@ -1,6 +1,7 @@
 import { LegalPage, OPERATOR, OPERATOR_ADDRESS } from "@/components/app/legal-page";
 
-export const metadata = { title: "Privacy Policy" };
+// Linked nowhere in the tool: only the URL registered in the TikTok developer app points here.
+export const metadata = { title: "Privacy Policy", robots: { index: false, follow: false } };
 
 export default function PrivacyPage() {
   return (
