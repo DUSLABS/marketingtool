@@ -1,4 +1,4 @@
-import { LegalPage, OPERATOR, OPERATOR_ADDRESS } from "@/components/app/legal-page";
+import { LegalPage, OPERATOR } from "@/components/app/legal-page";
 
 // Linked nowhere in the tool: only the URL registered in the TikTok developer app points here.
 export const metadata = { title: "Privacy Policy", robots: { index: false, follow: false } };
@@ -8,7 +8,7 @@ export default function PrivacyPage() {
     <LegalPage title="Privacy Policy" updated="2026-09-22">
       <h2>1. Controller</h2>
       <p>
-        {OPERATOR.brand}, {OPERATOR_ADDRESS}. Email: {OPERATOR.email}, phone: {OPERATOR.phone}.
+        The team that operates Slides Autopilot. Email: {OPERATOR.email}, phone: {OPERATOR.phone}.
       </p>
       <p>
         Slides Autopilot is an internal tool. It is used by invited members of our team to create photo slideshow

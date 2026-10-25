@@ -1,4 +1,4 @@
-import { LegalPage, OPERATOR, OPERATOR_ADDRESS } from "@/components/app/legal-page";
+import { LegalPage, OPERATOR } from "@/components/app/legal-page";
 
 // Linked nowhere in the tool: only the URL registered in the TikTok developer app points here.
 export const metadata = { title: "Terms of Service", robots: { index: false, follow: false } };
@@ -8,7 +8,7 @@ export default function TermsPage() {
     <LegalPage title="Terms of Service" updated="2026-09-22">
       <h2>1. Provider</h2>
       <p>
-        Slides Autopilot is provided by {OPERATOR.brand}, {OPERATOR_ADDRESS}.
+        Slides Autopilot is operated by our team for its own use. Contact details are in section 6.
       </p>
       <h2>2. Scope</h2>
       <p>

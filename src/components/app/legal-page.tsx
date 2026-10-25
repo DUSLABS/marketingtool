@@ -1,15 +1,9 @@
 import type { ReactNode } from "react";
 
 export const OPERATOR = {
-  brand: "DUSLABS",
-  street: "Walter-Eucken-Straße 105",
-  city: "40235 Düsseldorf",
-  country: "Germany",
   email: "hello@duslabs.de",
   phone: "+49 17238192040",
 };
-
-export const OPERATOR_ADDRESS = `${OPERATOR.street}, ${OPERATOR.city}, ${OPERATOR.country}`;
 
 export function LegalPage({ title, updated, children }: { title: string; updated: string; children: ReactNode }) {
   return (

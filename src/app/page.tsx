@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 import { Images, Megaphone, Send } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { Logo } from "@/components/app/logo";
-import { OPERATOR } from "@/components/app/legal-page";
 import { createClient } from "@/lib/supabase/server";
 
 // Public landing page: explains the app to TikTok's app reviewers and to anyone following the link.
@@ -45,7 +44,7 @@ export default async function LandingPage() {
           TikTok slideshows for our apps, created and scheduled in one place.
         </h1>
         <p className="mt-5 max-w-xl text-muted-foreground">
-          Slides Autopilot is used by the {OPERATOR.brand} team to create photo slideshow posts and publish them to our
+          Slides Autopilot is used by our team to create photo slideshow posts and publish them to our
           own TikTok accounts. Access is limited to invited team members.
         </p>
 
