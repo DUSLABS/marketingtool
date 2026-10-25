@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 
 export const OPERATOR = {
-  name: "Florian Nowak & Maximilian Förster",
   brand: "DUSLABS",
   street: "Walter-Eucken-Straße 105",
   city: "40235 Düsseldorf",

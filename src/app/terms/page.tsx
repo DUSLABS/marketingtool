@@ -8,7 +8,7 @@ export default function TermsPage() {
     <LegalPage title="Terms of Service" updated="2026-09-22">
       <h2>1. Provider</h2>
       <p>
-        Slides Autopilot is provided by {OPERATOR.name} ({OPERATOR.brand}), {OPERATOR_ADDRESS}.
+        Slides Autopilot is provided by {OPERATOR.brand}, {OPERATOR_ADDRESS}.
       </p>
       <h2>2. Scope</h2>
       <p>

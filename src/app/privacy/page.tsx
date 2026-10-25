@@ -8,7 +8,7 @@ export default function PrivacyPage() {
     <LegalPage title="Privacy Policy" updated="2026-09-22">
       <h2>1. Controller</h2>
       <p>
-        {OPERATOR.name} ({OPERATOR.brand}), {OPERATOR_ADDRESS}. Email: {OPERATOR.email}, phone: {OPERATOR.phone}.
+        {OPERATOR.brand}, {OPERATOR_ADDRESS}. Email: {OPERATOR.email}, phone: {OPERATOR.phone}.
       </p>
       <p>
         Slides Autopilot is an internal tool. It is used by invited members of our team to create photo slideshow
