@@ -21,6 +21,8 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: { default: "Slides Autopilot", template: "%s · Slides Autopilot" },
   description: "Automated TikTok slideshow campaigns.",
+  // Search Console ownership of marketingtool-alpha.vercel.app, used to remove the legal pages from Google.
+  verification: { google: "8Jp6QSJarNBa5Q4NIVwZZJA-IKam0w5O3xvxPOS-TaQ" },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
